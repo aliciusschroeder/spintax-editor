@@ -294,9 +294,9 @@ const generateSpintax = (node: SpintaxNode | null | undefined): string => {
       return node.children.map(child => generateSpintax(child)).join('');
 
     default:
-      // This case should be unreachable with discriminated unions
-      const exhaustiveCheck: never = node;
-      console.warn("generateSpintax encountered unknown node type:", exhaustiveCheck);
+      // This case should be unreachable with discriminated unions if types are correct
+      // const exhaustiveCheck: never = node; // This line can cause TS errors if node isn't truly 'never'
+      console.warn("generateSpintax encountered unknown node type"); // Avoid accessing node properties here
       return '';
   }
 };
@@ -329,9 +329,9 @@ const generateRandomVariant = (node: SpintaxNode | null | undefined): string => 
       return node.children.map(child => generateRandomVariant(child)).join('');
 
     default:
-      // This case should be unreachable with discriminated unions
-      const exhaustiveCheckRandom: never = node;
-      console.warn("generateRandomVariant encountered unknown node type:", exhaustiveCheckRandom);
+      // This case should be unreachable with discriminated unions if types are correct
+      // const exhaustiveCheckRandom: never = node; // This line can cause TS errors if node isn't truly 'never'
+      console.warn("generateRandomVariant encountered unknown node type"); // Avoid accessing node properties here
       return '';
   }
 };
@@ -398,9 +398,9 @@ const calculateVariations = (node: SpintaxNode | null | undefined): number | typ
         return rootVariationsCalc;
 
       default:
-         // This case should be unreachable with discriminated unions
-         const exhaustiveCheckCalc: never = node;
-         console.warn("calculateVariations encountered unknown node type:", exhaustiveCheckCalc);
+         // This case should be unreachable with discriminated unions if types are correct
+         // const exhaustiveCheckCalc: never = node; // This line can cause TS errors if node isn't truly 'never'
+         console.warn("calculateVariations encountered unknown node type"); // Avoid accessing node properties here
          return 1; // Treat unknown as 1 variation
     }
   } catch (error: unknown) { // Catch unknown error type
@@ -533,12 +533,15 @@ const NodeEditor: React.FC<NodeEditorProps> = ({ node, path, updateNode, deleteN
 
       // Return the parent node with the updated children array
       // Need to handle different parent types potentially
-      if (parentNode.type === 'root' || parentNode.type === 'option' || parentNode.type === 'choice') {
-         // Type assertion might be needed if TS struggles with the union type here
-         return { ...parentNode, children: newChildren as any }; // Using 'as any' temporarily, refine if possible
+      if (parentNode.type === 'root') {
+          return { ...parentNode, children: newChildren as (TextNode | ChoiceNode)[] };
+      } else if (parentNode.type === 'option') {
+          return { ...parentNode, children: newChildren as (TextNode | ChoiceNode)[] };
+      } else if (parentNode.type === 'choice') {
+          return { ...parentNode, children: newChildren as OptionNode[] };
       }
       // Should not happen if structure is correct, but return unchanged as fallback
-      console.error("Cannot move up: Unexpected parent node type.", parentNode.type);
+      console.error("Cannot move up: Unexpected parent node type.");
       return parentNode;
     });
   };
@@ -565,11 +568,14 @@ const NodeEditor: React.FC<NodeEditorProps> = ({ node, path, updateNode, deleteN
        const [removed] = newChildren.splice(currentIndex, 1);
        newChildren.splice(currentIndex + 1, 0, removed); // Insert one position later
 
-       if (parentNode.type === 'root' || parentNode.type === 'option' || parentNode.type === 'choice') {
-          // TODO: Type assertion might be needed
-          return { ...parentNode, children: newChildren as any }; // Using 'as any' temporarily
+       if (parentNode.type === 'root') {
+          return { ...parentNode, children: newChildren as (TextNode | ChoiceNode)[] };
+       } else if (parentNode.type === 'option') {
+          return { ...parentNode, children: newChildren as (TextNode | ChoiceNode)[] };
+       } else if (parentNode.type === 'choice') {
+          return { ...parentNode, children: newChildren as OptionNode[] };
        }
-       console.error("Cannot move down: Unexpected parent node type.", parentNode.type);
+       console.error("Cannot move down: Unexpected parent node type.");
        return parentNode;
     });
   };
@@ -887,11 +893,19 @@ const SpintaxEditorTab: React.FC<SpintaxEditorTabProps> = ({ initialSpintax = ''
         const prop = nodePath[i] as keyof (OptionNode | ChoiceNode | RootNode);
         const index = nodePath[i+1] as number;
 
-        if (!current || !(prop in current) || !Array.isArray((current as any)[prop]) || (current as any)[prop].length <= index || index < 0) {
-           console.error("Invalid path segment in getNodeByPath:", prop, index, "in node", current);
+        // Type guard to ensure 'current' has the property 'prop' before accessing it dynamically
+        if (!current || !(prop in current)) {
+            console.error("Invalid path segment in getNodeByPath: Property missing.", prop, "in node", current);
+            return null;
+        }
+        // Cast to unknown first for safer dynamic access
+        const childrenArray = (current as unknown as { [key: string]: unknown })[prop];
+
+        if (!Array.isArray(childrenArray) || childrenArray.length <= index || index < 0) {
+           console.error("Invalid path segment in getNodeByPath: Index out of bounds or not an array.", prop, index, "in node", current);
            return null;
         }
-        current = (current as any)[prop][index];
+        current = childrenArray[index] as SpintaxNode; // Assert type after validation
       }
       return current;
     } catch (e) {
@@ -903,9 +917,10 @@ const SpintaxEditorTab: React.FC<SpintaxEditorTabProps> = ({ initialSpintax = ''
 
   // Memoized callbacks for NodeEditor
   const updateNode = useCallback((path: SpintaxPath, newNodeOrFunction: SpintaxNode | ((currentNode: SpintaxNode | null) => SpintaxNode | null)) => {
-    setSpintaxTree((prevTree: RootNode | null) => { // Ensure prevTree can be null initially if needed
-      if (!prevTree) return prevTree;
+    setSpintaxTree((prevTree: RootNode): RootNode => { // prevTree is RootNode, returns RootNode
+      // No need to check !prevTree here as the state type is RootNode
       try {
+        // Deep clone to avoid mutation issues
         const newTree = JSON.parse(JSON.stringify(prevTree)) as RootNode;
 
         const currentNodeSnapshot = typeof newNodeOrFunction === 'function'
@@ -933,20 +948,33 @@ const SpintaxEditorTab: React.FC<SpintaxEditorTabProps> = ({ initialSpintax = ''
         const parentPath = path.slice(0, -2);
         let parent: SpintaxNode | null = newTree;
         for (let i = 0; i < parentPath.length; i += 2) {
-           const prop = parentPath[i] as keyof (OptionNode | ChoiceNode | RootNode);
+           const prop = parentPath[i] as keyof SpintaxNode; // More general keyof
            const index = parentPath[i+1] as number;
-           if (!parent || !(prop in parent) || !Array.isArray((parent as any)[prop]) || (parent as any)[prop].length <= index || index < 0) {
-               throw new Error(`Invalid parent path segment during update: ${prop}[${index}]`);
-           }
-           parent = (parent as any)[prop][index];
+
+            if (!parent || !(prop in parent)) {
+                throw new Error(`Invalid parent path segment during update: Property ${prop} missing`);
+            }
+            // Cast to unknown first for safer dynamic access
+            const childrenArray = (parent as unknown as { [key: string]: unknown })[prop];
+            if (!Array.isArray(childrenArray) || childrenArray.length <= index || index < 0) {
+                throw new Error(`Invalid parent path segment during update: Index ${index} out of bounds for ${prop}`);
+            }
+           parent = childrenArray[index] as SpintaxNode;
         }
 
-        const parentProperty = path[path.length - 2] as keyof (OptionNode | ChoiceNode | RootNode);
+        const parentProperty = path[path.length - 2]; // Keep as string | number initially
         const nodeIndex = path[path.length - 1] as number;
 
-        if (parent && parentProperty === 'children' && 'children' in parent && Array.isArray(parent.children) && parent.children.length > nodeIndex && nodeIndex >= 0) {
-           parent.children[nodeIndex] = newNode;
-           return newTree;
+        // Check if the property is 'children' and the parent is of a type that can have children
+        if (parent && parentProperty === 'children' && (parent.type === 'root' || parent.type === 'choice' || parent.type === 'option')) {
+            // Now TypeScript knows parent has a 'children' array
+            if (Array.isArray(parent.children) && parent.children.length > nodeIndex && nodeIndex >= 0) {
+                parent.children[nodeIndex] = newNode;
+                return newTree;
+            } else {
+                 console.error("Invalid target for update: Index out of bounds.", "Parent:", parent, "Property:", parentProperty, "Index:", nodeIndex);
+                 throw new Error(`Invalid target location for node update: Index out of bounds`);
+            }
         } else {
           console.error("Invalid target for update:", "Parent:", parent, "Property:", parentProperty, "Index:", nodeIndex, "Parent Children:", parent && 'children' in parent ? parent.children : 'N/A');
           throw new Error(`Invalid target location for node update`);
@@ -964,26 +992,38 @@ const SpintaxEditorTab: React.FC<SpintaxEditorTabProps> = ({ initialSpintax = ''
         console.warn("Attempted to delete root node or invalid path:", path);
         return;
     }
-    setSpintaxTree((prevTree: RootNode | null) => {
-       if (!prevTree) return prevTree;
+    setSpintaxTree((prevTree: RootNode): RootNode => { // prevTree is RootNode, returns RootNode
+       // No need to check !prevTree
        try {
         const newTree = JSON.parse(JSON.stringify(prevTree)) as RootNode;
         let parent: SpintaxNode | null = newTree;
         for (let i = 0; i < path.length - 2; i += 2) {
-            const prop = path[i] as keyof (OptionNode | ChoiceNode | RootNode);
+            const prop = path[i] as keyof SpintaxNode;
             const index = path[i+1] as number;
-            if (!parent || !(prop in parent) || !Array.isArray((parent as any)[prop]) || (parent as any)[prop].length <= index || index < 0) {
-                throw new Error(`Invalid path segment during delete navigation: ${prop}[${index}]`);
+            if (!parent || !(prop in parent)) {
+                 throw new Error(`Invalid path segment during delete navigation: Property ${prop} missing`);
             }
-            parent = (parent as any)[prop][index];
+             // Cast to unknown first for safer dynamic access
+            const childrenArray = (parent as unknown as { [key: string]: unknown })[prop];
+            if (!Array.isArray(childrenArray) || childrenArray.length <= index || index < 0) {
+                throw new Error(`Invalid path segment during delete navigation: Index ${index} out of bounds for ${prop}`);
+            }
+            parent = childrenArray[index] as SpintaxNode;
         }
 
-        const parentProperty = path[path.length - 2] as keyof (OptionNode | ChoiceNode | RootNode);
+        const parentProperty = path[path.length - 2]; // Keep as string | number initially
         const nodeIndex = path[path.length - 1] as number;
 
-        if (parent && parentProperty === 'children' && 'children' in parent && Array.isArray(parent.children) && parent.children.length > nodeIndex && nodeIndex >= 0) {
-            parent.children.splice(nodeIndex, 1);
-            return newTree;
+        // Check if the property is 'children' and the parent is of a type that can have children
+        if (parent && parentProperty === 'children' && (parent.type === 'root' || parent.type === 'choice' || parent.type === 'option')) {
+             // Now TypeScript knows parent has a 'children' array
+             if (Array.isArray(parent.children) && parent.children.length > nodeIndex && nodeIndex >= 0) {
+                parent.children.splice(nodeIndex, 1);
+                return newTree;
+             } else {
+                 console.error("Invalid target for delete: Index out of bounds.", "Parent:", parent, "Property:", parentProperty, "Index:", nodeIndex);
+                 throw new Error(`Invalid target location for node deletion: Index out of bounds`);
+             }
         } else {
             console.error("Invalid target for delete:", "Parent:", parent, "Property:", parentProperty, "Index:", nodeIndex, "Parent Children:", parent && 'children' in parent ? parent.children : 'N/A');
             throw new Error(`Invalid target location for node deletion`);
@@ -1000,30 +1040,43 @@ const SpintaxEditorTab: React.FC<SpintaxEditorTabProps> = ({ initialSpintax = ''
         console.warn("Invalid arguments for addNode:", "Path:", path, "Node:", newNode);
         return;
     }
-    setSpintaxTree((prevTree: RootNode | null) => {
-       if (!prevTree) return prevTree;
+    setSpintaxTree((prevTree: RootNode): RootNode => { // prevTree is RootNode, returns RootNode
+       // No need to check !prevTree
        try {
         const newTree = JSON.parse(JSON.stringify(prevTree)) as RootNode;
         let parent: SpintaxNode | null = newTree;
 
         // Navigate to the parent node
         for (let i = 0; i < path.length - 2; i += 2) {
-            const prop = path[i] as keyof (OptionNode | ChoiceNode | RootNode);
+            const prop = path[i] as keyof SpintaxNode;
             const index = path[i+1] as number;
-             if (!parent || !(prop in parent) || !Array.isArray((parent as any)[prop]) || (parent as any)[prop].length <= index || index < 0) {
-                throw new Error(`Invalid path segment during add navigation: ${prop}[${index}]`);
+             if (!parent || !(prop in parent)) {
+                 throw new Error(`Invalid path segment during add navigation: Property ${prop} missing`);
+             }
+              // Cast to unknown first for safer dynamic access
+             const childrenArray = (parent as unknown as { [key: string]: unknown })[prop];
+             if (!Array.isArray(childrenArray) || childrenArray.length <= index || index < 0) {
+                throw new Error(`Invalid path segment during add navigation: Index ${index} out of bounds for ${prop}`);
             }
-            parent = (parent as any)[prop][index];
+            parent = childrenArray[index] as SpintaxNode;
         }
 
-        const parentProperty = path[path.length - 2] as keyof (OptionNode | ChoiceNode | RootNode);
+        const parentProperty = path[path.length - 2]; // Keep as string | number initially
         const targetIndex = path[path.length - 1] as number;
 
         // Add to the parent's children array
-        if (parent && parentProperty === 'children' && 'children' in parent && Array.isArray(parent.children)) {
-             const validIndex = Math.max(0, Math.min(targetIndex, parent.children.length));
-            parent.children.splice(validIndex, 0, newNode);
-            return newTree;
+        // Check if the property is 'children' and the parent is of a type that can have children
+        if (parent && parentProperty === 'children' && (parent.type === 'root' || parent.type === 'choice' || parent.type === 'option')) {
+             // Now TypeScript knows parent has a 'children' array
+             if (Array.isArray(parent.children)) {
+                 const validIndex = Math.max(0, Math.min(targetIndex, parent.children.length));
+                 parent.children.splice(validIndex, 0, newNode);
+                 return newTree;
+             } else {
+                 // This case should ideally not be reached if parent types are correct
+                 console.error("Invalid target for add: Parent children is not an array.", "Parent:", parent, "Property:", parentProperty, "Index:", targetIndex);
+                 throw new Error(`Invalid target location for node addition: Children not an array`);
+             }
         } else {
              console.error("Invalid target for add:", "Parent:", parent, "Property:", parentProperty, "Index:", targetIndex, "Parent Children:", parent && 'children' in parent ? parent.children : 'N/A');
              throw new Error(`Invalid target location for node addition`);
@@ -1613,3 +1666,5 @@ const SpintaxEditorComponent: React.FC = () => { // Use React.FC for component t
 };
 
 export default SpintaxEditorComponent;
+
+
