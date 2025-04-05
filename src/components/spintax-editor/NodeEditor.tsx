@@ -161,12 +161,18 @@ export const NodeEditor: React.FC<NodeEditorProps> = ({
     if (currentIndex <= 0) return; // Already at the top
 
     updateNode(parentPath, (parentNode: SpintaxNode | null) => {
-      if (
-        !parentNode ||
-        !("children" in parentNode) ||
-        !Array.isArray(parentNode.children)
-      ) {
-        console.error("Cannot move up: Invalid parent node", parentNode);
+      if (!parentNode) {
+        console.error("Cannot move up: Parent node is null");
+        return parentNode;
+      }
+
+      if (parentNode.type === "text") {
+        console.error("Cannot move up: Parent node is a text node with no children");
+        return parentNode;
+      }
+
+      if (!Array.isArray(parentNode.children)) {
+        console.error("Cannot move up: Parent node has no children array");
         return parentNode;
       }
 
@@ -183,8 +189,25 @@ export const NodeEditor: React.FC<NodeEditorProps> = ({
       const [removed] = newChildren.splice(currentIndex, 1);
       newChildren.splice(currentIndex - 1, 0, removed);
 
-      // Handle different parent types
-      return { ...parentNode, children: newChildren };
+      // Create a properly typed new node based on the parent type
+      switch (parentNode.type) {
+        case "root":
+          return { ...parentNode, children: newChildren };
+        case "choice":
+          // Need to ensure we only have OptionNodes in a choice's children
+          if (newChildren.every(child => child.type === "option")) {
+            return {
+              ...parentNode,
+              children: newChildren as OptionNode[]
+            };
+          }
+          console.error("Invalid child types for choice node");
+          return parentNode;
+        case "option":
+          return { ...parentNode, children: newChildren };
+        default:
+          return parentNode;
+      }
     });
   };
 
@@ -195,12 +218,18 @@ export const NodeEditor: React.FC<NodeEditorProps> = ({
     const currentIndex = path[path.length - 1] as number;
 
     updateNode(parentPath, (parentNode: SpintaxNode | null) => {
-      if (
-        !parentNode ||
-        !("children" in parentNode) ||
-        !Array.isArray(parentNode.children)
-      ) {
-        console.error("Cannot move down: Invalid parent node", parentNode);
+      if (!parentNode) {
+        console.error("Cannot move down: Parent node is null");
+        return parentNode;
+      }
+
+      if (parentNode.type === "text") {
+        console.error("Cannot move down: Parent node is a text node with no children");
+        return parentNode;
+      }
+
+      if (!Array.isArray(parentNode.children)) {
+        console.error("Cannot move down: Parent node has no children array");
         return parentNode;
       }
 
@@ -212,7 +241,25 @@ export const NodeEditor: React.FC<NodeEditorProps> = ({
       const [removed] = newChildren.splice(currentIndex, 1);
       newChildren.splice(currentIndex + 1, 0, removed);
 
-      return { ...parentNode, children: newChildren };
+      // Create a properly typed new node based on the parent type
+      switch (parentNode.type) {
+        case "root":
+          return { ...parentNode, children: newChildren };
+        case "choice":
+          // Need to ensure we only have OptionNodes in a choice's children
+          if (newChildren.every(child => child.type === "option")) {
+            return {
+              ...parentNode,
+              children: newChildren as OptionNode[]
+            };
+          }
+          console.error("Invalid child types for choice node");
+          return parentNode;
+        case "option":
+          return { ...parentNode, children: newChildren };
+        default:
+          return parentNode;
+      }
     });
   };
 
@@ -344,11 +391,6 @@ export const NodeEditor: React.FC<NodeEditorProps> = ({
                   onClick={handleEdit}
                   title="Click to edit"
                 >
-                  {/* {node.content ? (
-                    node.content
-                  ) : (
-                    <span className="italic text-gray-400">empty text</span>
-                  )} */}
                   <NodeContentDisplay content={node.content} />
                 </span>
               ) : (

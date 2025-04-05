@@ -66,6 +66,13 @@ interface UseSpintaxTreeReturn {
 }
 
 /**
+ * Type guard to check if a node has children property
+ */
+function hasChildren(node: SpintaxNode): node is RootNode | ChoiceNode | OptionNode {
+  return node.type === 'root' || node.type === 'choice' || node.type === 'option';
+}
+
+/**
  * Custom hook for managing a spintax tree
  * 
  * @param initialSpintax - Initial spintax string to parse
@@ -122,6 +129,11 @@ export const useSpintaxTree = (initialSpintax?: string): UseSpintaxTreeReturn =>
         if (!current || !(prop in current)) {
           return null;
         }
+        
+        // Skip if we're accessing 'children' on a node that can't have them
+        /* if (prop === 'children' && !hasChildren(current)) {
+          return null;
+        } */
         
         // Cast to unknown first for safer dynamic access
         const childrenArray = (current as unknown as { [key: string]: unknown })[prop];
@@ -225,10 +237,14 @@ export const useSpintaxTree = (initialSpintax?: string): UseSpintaxTreeReturn =>
           throw new Error("Parent node not found");
         }
         
+        if (!hasChildren(parentNode)) {
+          throw new Error(`Parent node of type ${parentNode.type} cannot have children`);
+        }
+        
         const nodeIndex = path[path.length - 1] as number;
         
         // Update the node in the parent's children array
-        if (Array.isArray(parentNode.children) && nodeIndex >= 0 && nodeIndex < parentNode.children.length) {
+        if (nodeIndex >= 0 && nodeIndex < parentNode.children.length) {
           parentNode.children[nodeIndex] = newNode;
           updateStateFromTree(newTree);
           return newTree;
@@ -256,7 +272,6 @@ export const useSpintaxTree = (initialSpintax?: string): UseSpintaxTreeReturn =>
         // Deep clone to avoid mutation issues
         const newTree = JSON.parse(JSON.stringify(prevTree)) as RootNode;
         
-        // Get the parent path and node
         const parentPath = path.slice(0, -2);
         const parentNode = getNodeByPath(parentPath) as SpintaxNode;
         
@@ -264,10 +279,14 @@ export const useSpintaxTree = (initialSpintax?: string): UseSpintaxTreeReturn =>
           throw new Error("Parent node not found");
         }
         
+        if (!hasChildren(parentNode)) {
+          throw new Error(`Parent node of type ${parentNode.type} cannot have children`);
+        }
+        
         const nodeIndex = path[path.length - 1] as number;
         
         // Delete the node from the parent's children array
-        if (Array.isArray(parentNode.children) && nodeIndex >= 0 && nodeIndex < parentNode.children.length) {
+        if (nodeIndex >= 0 && nodeIndex < parentNode.children.length) {
           parentNode.children.splice(nodeIndex, 1);
           updateStateFromTree(newTree);
           return newTree;
@@ -295,7 +314,6 @@ export const useSpintaxTree = (initialSpintax?: string): UseSpintaxTreeReturn =>
         // Deep clone to avoid mutation issues
         const newTree = JSON.parse(JSON.stringify(prevTree)) as RootNode;
         
-        // Get the parent path and node
         const parentPath = path.slice(0, -2);
         const parentNode = getNodeByPath(parentPath) as SpintaxNode;
         
@@ -303,17 +321,17 @@ export const useSpintaxTree = (initialSpintax?: string): UseSpintaxTreeReturn =>
           throw new Error("Parent node not found");
         }
         
+        if (!hasChildren(parentNode)) {
+          throw new Error(`Parent node of type ${parentNode.type} cannot have children`);
+        }
+        
         const nodeIndex = path[path.length - 1] as number;
         
         // Add the node to the parent's children array
-        if (Array.isArray(parentNode.children)) {
-          const validIndex = Math.max(0, Math.min(nodeIndex, parentNode.children.length));
-          parentNode.children.splice(validIndex, 0, newNode);
-          updateStateFromTree(newTree);
-          return newTree;
-        }
-        
-        throw new Error("Parent has no children array");
+        const validIndex = Math.max(0, Math.min(nodeIndex, parentNode.children.length));
+        parentNode.children.splice(validIndex, 0, newNode);
+        updateStateFromTree(newTree);
+        return newTree;
       } catch (e) {
         const errorMsg = e instanceof Error ? e.message : "Unknown error";
         setError(`Error adding node: ${errorMsg}`);
