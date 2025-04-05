@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import React, { useCallback, useState } from "react";
 import { ImportExportModal } from "./ImportExportModal";
+import { ConfirmReloadModal } from "./ConfirmReloadModal";
 import { SpintaxEditorTab } from "./SpintaxEditorTab";
 import Image from "next/image";
 import editorLogo from "@/../public/logo.svg";
@@ -29,7 +30,9 @@ export const SpintaxEditor: React.FC = () => {
   const [entries, setEntries] = useState<YamlEntries>({});
   const [activeEntry, setActiveEntry] = useState<string | null>(null);
 
-  // Modal state
+  // Modal states
+  const [showConfirmReloadModal, setShowConfirmReloadModal] =
+    useState<boolean>(false);
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [yamlExport, setYamlExport] = useState<string>("");
   const [showYamlExport, setShowYamlExport] = useState<boolean>(false);
@@ -159,28 +162,31 @@ export const SpintaxEditor: React.FC = () => {
       {/* Header Section */}
       <header className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-3 shadow-md flex flex-wrap justify-between items-center flex-shrink-0 gap-2">
         {/* Title */}
-        <div className="flex flex-row items-center space-x-2">
-          <div>
-            <Image
-              src={editorLogo}
-              alt="Spintax Editor Logo"
-              width={42}
-              height={42}
-              className="mr-2 pt-1"
-              // priority
-            />
+        <a onClick={() => setShowConfirmReloadModal(true)}>
+          <div className="flex flex-row items-center space-x-2 cursor-pointer">
+            <div>
+              <Image
+                src={editorLogo}
+                alt="Spintax Editor Logo"
+                width={42}
+                height={42}
+                className="mr-2 pt-1"
+              />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold">Spintax Editor</h1>
+              <p className="text-xs opacity-80">
+                Visual tree editor for spintax
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-bold">Spintax Editor</h1>
-            <p className="text-xs opacity-80">Visual tree editor for spintax</p>
-          </div>
-        </div>
+        </a>
 
         {/* Action Buttons */}
         <div className="flex space-x-2 flex-wrap gap-1">
           <button
             onClick={() => setShowImportModal(true)}
-            className="px-3 py-1 bg-blue-700 hover:bg-blue-800 rounded text-sm flex items-center"
+            className="px-3 py-1 bg-blue-700 hover:bg-blue-800 rounded text-md flex items-center"
             title="Import Spintax or YAML"
           >
             <Upload size={14} className="mr-1" /> Import
@@ -189,7 +195,7 @@ export const SpintaxEditor: React.FC = () => {
           {Object.keys(entries).length > 0 && (
             <button
               onClick={handleExportYaml}
-              className="px-3 py-1 bg-blue-700 hover:bg-blue-800 rounded text-sm flex items-center"
+              className="px-3 py-1 bg-blue-700 hover:bg-blue-800 rounded text-md flex items-center"
               title="Export all entries as YAML"
             >
               <Download size={14} className="mr-1" /> Export YAML
@@ -198,7 +204,7 @@ export const SpintaxEditor: React.FC = () => {
 
           <button
             onClick={handleLoadDemo}
-            className="px-3 py-1 bg-green-500 hover:bg-green-600 rounded text-sm flex items-center"
+            className="px-3 py-1 bg-green-500 hover:bg-green-600 rounded text-md flex items-center"
             title="Load example YAML data"
           >
             <FileCode size={14} className="mr-1" /> Load Demo
@@ -308,6 +314,12 @@ export const SpintaxEditor: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Confirm Reload Modal */}
+      <ConfirmReloadModal
+        isOpen={showConfirmReloadModal}
+        onClose={() => setShowConfirmReloadModal(false)}
+      />
 
       {/* Import Modal */}
       <ImportExportModal
