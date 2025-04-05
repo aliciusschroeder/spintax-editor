@@ -19,8 +19,10 @@ import {
   FileText,
   Pencil,
   Plus,
+  Redo,
   RotateCw,
   Trash2,
+  Undo,
 } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
 import { NodeEditor } from "./NodeEditor";
@@ -36,6 +38,8 @@ export interface SpintaxEditorTabProps {
   onUpdate?: (newSpintax: string) => void;
 }
 
+const MAX_HISTORY_SIZE = 50; // Limit history size
+
 /**
  * Component for editing, previewing, and exporting a single spintax entry
  */
@@ -43,7 +47,7 @@ export const SpintaxEditorTab: React.FC<SpintaxEditorTabProps> = ({
   initialSpintax = "",
   onUpdate,
 }) => {
-  // State for the spintax tree structure
+  // State for the spintax tree structure (current state)
   const [spintaxTree, setSpintaxTree] = useState<RootNode>(() => {
     try {
       return parseSpintax(initialSpintax);
@@ -52,6 +56,10 @@ export const SpintaxEditorTab: React.FC<SpintaxEditorTabProps> = ({
       return { type: "root", children: [] };
     }
   });
+
+  // History state
+  const [history, setHistory] = useState<RootNode[]>([]);
+  const [redoStack, setRedoStack] = useState<RootNode[]>([]);
 
   // Additional state
   const [outputText, setOutputText] = useState<string>("");
@@ -215,10 +223,21 @@ export const SpintaxEditorTab: React.FC<SpintaxEditorTabProps> = ({
         | SpintaxNode
         | ((currentNode: SpintaxNode | null) => SpintaxNode | null)
     ) => {
+      // --- History Management ---
+      setHistory((prevHistory) => {
+        const newHistory = [spintaxTree, ...prevHistory];
+        if (newHistory.length > MAX_HISTORY_SIZE) {
+          newHistory.pop(); // Remove oldest entry if limit exceeded
+        }
+        return newHistory;
+      });
+      setRedoStack([]); // Clear redo stack on new action
+      // --- End History Management ---
+
       setSpintaxTree((prevTree: RootNode): RootNode => {
         try {
-          // Deep clone to avoid mutation issues
-          const newTree = JSON.parse(JSON.stringify(prevTree)) as RootNode;
+          // Use the tree from the closure, not prevTree, as history is already updated
+          const newTree = JSON.parse(JSON.stringify(spintaxTree)) as RootNode;
 
           const currentNodeSnapshot =
             typeof newNodeOrFunction === "function"
@@ -341,209 +360,239 @@ export const SpintaxEditorTab: React.FC<SpintaxEditorTabProps> = ({
         }
       });
     },
-    [getNodeByPath]
+    [getNodeByPath, spintaxTree]
   );
 
   // Callback for NodeEditor to delete a node
-  const deleteNode = useCallback((path: SpintaxPath) => {
-    if (!path || path.length < 2) {
-      console.warn("Attempted to delete root node or invalid path:", path);
-      return;
-    }
+  const deleteNode = useCallback(
+    (path: SpintaxPath) => {
+      if (!path || path.length < 2) {
+        console.warn("Attempted to delete root node or invalid path:", path);
+        return;
+      }
 
-    setSpintaxTree((prevTree: RootNode): RootNode => {
-      try {
-        const newTree = JSON.parse(JSON.stringify(prevTree)) as RootNode;
-
-        // Navigate to parent node
-        let parent: SpintaxNode | null = newTree;
-        for (let i = 0; i < path.length - 2; i += 2) {
-          const prop = path[i] as keyof SpintaxNode;
-          const index = path[i + 1] as number;
-
-          if (!parent || !(prop in parent)) {
-            throw new Error(
-              `Invalid path segment during delete navigation: Property ${prop} missing`
-            );
-          }
-
-          // Cast to unknown first for safer dynamic access
-          const childrenArray = (
-            parent as unknown as { [key: string]: unknown }
-          )[prop];
-
-          if (
-            !Array.isArray(childrenArray) ||
-            childrenArray.length <= index ||
-            index < 0
-          ) {
-            throw new Error(
-              `Invalid path segment during delete navigation: Index ${index} out of bounds for ${prop}`
-            );
-          }
-
-          parent = childrenArray[index] as SpintaxNode;
+      // --- History Management ---
+      setHistory((prevHistory) => {
+        const newHistory = [spintaxTree, ...prevHistory];
+        if (newHistory.length > MAX_HISTORY_SIZE) {
+          newHistory.pop();
         }
+        return newHistory;
+      });
+      setRedoStack([]);
+      // --- End History Management ---
 
-        const parentProperty = path[path.length - 2];
-        const nodeIndex = path[path.length - 1] as number;
+      setSpintaxTree((prevTree: RootNode): RootNode => {
+        try {
+          // Use the tree from the closure
+          const newTree = JSON.parse(JSON.stringify(spintaxTree)) as RootNode;
 
-        // Delete the node from the parent's children array
-        if (
-          parent &&
-          parentProperty === "children" &&
-          (parent.type === "root" ||
-            parent.type === "choice" ||
-            parent.type === "option")
-        ) {
+          // Navigate to parent node
+          let parent: SpintaxNode | null = newTree;
+          for (let i = 0; i < path.length - 2; i += 2) {
+            const prop = path[i] as keyof SpintaxNode;
+            const index = path[i + 1] as number;
+
+            if (!parent || !(prop in parent)) {
+              throw new Error(
+                `Invalid path segment during delete navigation: Property ${prop} missing`
+              );
+            }
+
+            // Cast to unknown first for safer dynamic access
+            const childrenArray = (
+              parent as unknown as { [key: string]: unknown }
+            )[prop];
+
+            if (
+              !Array.isArray(childrenArray) ||
+              childrenArray.length <= index ||
+              index < 0
+            ) {
+              throw new Error(
+                `Invalid path segment during delete navigation: Index ${index} out of bounds for ${prop}`
+              );
+            }
+
+            parent = childrenArray[index] as SpintaxNode;
+          }
+
+          const parentProperty = path[path.length - 2];
+          const nodeIndex = path[path.length - 1] as number;
+
+          // Delete the node from the parent's children array
           if (
-            Array.isArray(parent.children) &&
-            parent.children.length > nodeIndex &&
-            nodeIndex >= 0
+            parent &&
+            parentProperty === "children" &&
+            (parent.type === "root" ||
+              parent.type === "choice" ||
+              parent.type === "option")
           ) {
-            parent.children.splice(nodeIndex, 1);
-            return newTree;
+            if (
+              Array.isArray(parent.children) &&
+              parent.children.length > nodeIndex &&
+              nodeIndex >= 0
+            ) {
+              parent.children.splice(nodeIndex, 1);
+              return newTree;
+            } else {
+              console.error(
+                "Invalid target for delete: Index out of bounds.",
+                "Parent:",
+                parent,
+                "Property:",
+                parentProperty,
+                "Index:",
+                nodeIndex
+              );
+              throw new Error(
+                `Invalid target location for node deletion: Index out of bounds`
+              );
+            }
           } else {
             console.error(
-              "Invalid target for delete: Index out of bounds.",
+              "Invalid target for delete:",
               "Parent:",
               parent,
               "Property:",
               parentProperty,
               "Index:",
-              nodeIndex
+              nodeIndex,
+              "Parent Children:",
+              parent && "children" in parent ? parent.children : "N/A"
             );
-            throw new Error(
-              `Invalid target location for node deletion: Index out of bounds`
-            );
+            throw new Error(`Invalid target location for node deletion`);
           }
-        } else {
-          console.error(
-            "Invalid target for delete:",
-            "Parent:",
-            parent,
-            "Property:",
-            parentProperty,
-            "Index:",
-            nodeIndex,
-            "Parent Children:",
-            parent && "children" in parent ? parent.children : "N/A"
-          );
-          throw new Error(`Invalid target location for node deletion`);
+        } catch (error: unknown) {
+          console.error("Delete node failed:", error, "Path:", path);
+          return prevTree;
         }
-      } catch (error: unknown) {
-        console.error("Delete node failed:", error, "Path:", path);
-        return prevTree;
-      }
-    });
-  }, []);
+      });
+    },
+    [spintaxTree]
+  );
 
   // Callback for NodeEditor to add a node
-  const addNode = useCallback((path: SpintaxPath, newNode: SpintaxNode) => {
-    if (!path || path.length < 2 || !newNode) {
-      console.warn(
-        "Invalid arguments for addNode:",
-        "Path:",
-        path,
-        "Node:",
-        newNode
-      );
-      return;
-    }
-
-    setSpintaxTree((prevTree: RootNode): RootNode => {
-      try {
-        const newTree = JSON.parse(JSON.stringify(prevTree)) as RootNode;
-
-        // Navigate to parent node
-        let parent: SpintaxNode | null = newTree;
-        for (let i = 0; i < path.length - 2; i += 2) {
-          const prop = path[i] as keyof SpintaxNode;
-          const index = path[i + 1] as number;
-
-          if (!parent || !(prop in parent)) {
-            throw new Error(
-              `Invalid path segment during add navigation: Property ${prop} missing`
-            );
-          }
-
-          // Cast to unknown first for safer dynamic access
-          const childrenArray = (
-            parent as unknown as { [key: string]: unknown }
-          )[prop];
-
-          if (
-            !Array.isArray(childrenArray) ||
-            childrenArray.length <= index ||
-            index < 0
-          ) {
-            throw new Error(
-              `Invalid path segment during add navigation: Index ${index} out of bounds for ${prop}`
-            );
-          }
-
-          parent = childrenArray[index] as SpintaxNode;
-        }
-
-        const parentProperty = path[path.length - 2];
-        const targetIndex = path[path.length - 1] as number;
-
-        // Add the node to the parent's children array
-        if (
-          parent &&
-          parentProperty === "children" &&
-          (parent.type === "root" ||
-            parent.type === "choice" ||
-            parent.type === "option")
-        ) {
-          if (Array.isArray(parent.children)) {
-            const validIndex = Math.max(
-              0,
-              Math.min(targetIndex, parent.children.length)
-            );
-            parent.children.splice(validIndex, 0, newNode);
-            return newTree;
-          } else {
-            console.error(
-              "Invalid target for add: Parent children is not an array.",
-              "Parent:",
-              parent,
-              "Property:",
-              parentProperty,
-              "Index:",
-              targetIndex
-            );
-            throw new Error(
-              `Invalid target location for node addition: Children not an array`
-            );
-          }
-        } else {
-          console.error(
-            "Invalid target for add:",
-            "Parent:",
-            parent,
-            "Property:",
-            parentProperty,
-            "Index:",
-            targetIndex,
-            "Parent Children:",
-            parent && "children" in parent ? parent.children : "N/A"
-          );
-          throw new Error(`Invalid target location for node addition`);
-        }
-      } catch (error: unknown) {
-        console.error(
-          "Add node failed:",
-          error,
+  const addNode = useCallback(
+    (path: SpintaxPath, newNode: SpintaxNode) => {
+      if (!path || path.length < 2 || !newNode) {
+        console.warn(
+          "Invalid arguments for addNode:",
           "Path:",
           path,
           "Node:",
           newNode
         );
-        return prevTree;
+        return;
       }
-    });
-  }, []);
+
+      // --- History Management ---
+      setHistory((prevHistory) => {
+        const newHistory = [spintaxTree, ...prevHistory];
+        if (newHistory.length > MAX_HISTORY_SIZE) {
+          newHistory.pop();
+        }
+        return newHistory;
+      });
+      setRedoStack([]);
+      // --- End History Management ---
+
+      setSpintaxTree((prevTree: RootNode): RootNode => {
+        try {
+          // Use the tree from the closure
+          const newTree = JSON.parse(JSON.stringify(spintaxTree)) as RootNode;
+
+          // Navigate to parent node
+          let parent: SpintaxNode | null = newTree;
+          for (let i = 0; i < path.length - 2; i += 2) {
+            const prop = path[i] as keyof SpintaxNode;
+            const index = path[i + 1] as number;
+
+            if (!parent || !(prop in parent)) {
+              throw new Error(
+                `Invalid path segment during add navigation: Property ${prop} missing`
+              );
+            }
+
+            // Cast to unknown first for safer dynamic access
+            const childrenArray = (
+              parent as unknown as { [key: string]: unknown }
+            )[prop];
+
+            if (
+              !Array.isArray(childrenArray) ||
+              childrenArray.length <= index ||
+              index < 0
+            ) {
+              throw new Error(
+                `Invalid path segment during add navigation: Index ${index} out of bounds for ${prop}`
+              );
+            }
+
+            parent = childrenArray[index] as SpintaxNode;
+          }
+
+          const parentProperty = path[path.length - 2];
+          const targetIndex = path[path.length - 1] as number;
+
+          // Add the node to the parent's children array
+          if (
+            parent &&
+            parentProperty === "children" &&
+            (parent.type === "root" ||
+              parent.type === "choice" ||
+              parent.type === "option")
+          ) {
+            if (Array.isArray(parent.children)) {
+              const validIndex = Math.max(
+                0,
+                Math.min(targetIndex, parent.children.length)
+              );
+              parent.children.splice(validIndex, 0, newNode);
+              return newTree;
+            } else {
+              console.error(
+                "Invalid target for add: Parent children is not an array.",
+                "Parent:",
+                parent,
+                "Property:",
+                parentProperty,
+                "Index:",
+                targetIndex
+              );
+              throw new Error(
+                `Invalid target location for node addition: Children not an array`
+              );
+            }
+          } else {
+            console.error(
+              "Invalid target for add:",
+              "Parent:",
+              parent,
+              "Property:",
+              parentProperty,
+              "Index:",
+              targetIndex,
+              "Parent Children:",
+              parent && "children" in parent ? parent.children : "N/A"
+            );
+            throw new Error(`Invalid target location for node addition`);
+          }
+        } catch (error: unknown) {
+          console.error(
+            "Add node failed:",
+            error,
+            "Path:",
+            path,
+            "Node:",
+            newNode
+          );
+          return prevTree;
+        }
+      });
+    },
+    [spintaxTree]
+  );
 
   // Generate a random preview variant
   const generatePreview = useCallback(() => {
@@ -573,9 +622,44 @@ export const SpintaxEditorTab: React.FC<SpintaxEditorTabProps> = ({
 
   // Clear all content handler
   const handleClearAll = () => {
+    // --- History Management ---
+    setHistory((prevHistory) => {
+      const newHistory = [spintaxTree, ...prevHistory];
+      if (newHistory.length > MAX_HISTORY_SIZE) {
+        newHistory.pop();
+      }
+      return newHistory;
+    });
+    setRedoStack([]);
+    // --- End History Management ---
+
     setSpintaxTree({ type: "root", children: [] });
     setParseError(null);
   };
+
+  // Undo handler
+  const handleUndo = useCallback(() => {
+    if (history.length === 0) return;
+
+    const previousState = history[0];
+    const newHistory = history.slice(1);
+
+    setRedoStack((prevRedo) => [spintaxTree, ...prevRedo]);
+    setHistory(newHistory);
+    setSpintaxTree(previousState);
+  }, [history, spintaxTree]);
+
+  // Redo handler
+  const handleRedo = useCallback(() => {
+    if (redoStack.length === 0) return;
+
+    const nextState = redoStack[0];
+    const newRedoStack = redoStack.slice(1);
+
+    setHistory((prevHistory) => [spintaxTree, ...prevHistory]);
+    setRedoStack(newRedoStack);
+    setSpintaxTree(nextState);
+  }, [redoStack, spintaxTree]);
 
   // Format variation count for display
   const displayVariationCount =
@@ -628,9 +712,14 @@ export const SpintaxEditorTab: React.FC<SpintaxEditorTabProps> = ({
         {activeTab === "editor" && (
           <div className="flex-1 flex flex-col h-full">
             {/* Editor Actions Bar */}
-            <div className="p-2 border-b flex justify-between items-center bg-gray-50 flex-wrap flex-shrink-0">
+            <div className="p-2 border-b flex justify-between items-center bg-gray-50 flex-wrap flex-shrink-0 gap-2">
+              {/* Left side: Add buttons */}
               <div className="flex space-x-2 items-center mb-1 sm:mb-0">
-                <span className="text-sm font-medium mr-2">Add to Root:</span>
+                {" "}
+                {/* Reverted mb-1 sm:mb-0 from original for consistency */}
+                <span className="text-sm font-medium mr-2 hidden sm:inline">
+                  Add to Root:
+                </span>
                 {/* Add Text Node Button */}
                 <button
                   onClick={() =>
@@ -661,14 +750,38 @@ export const SpintaxEditorTab: React.FC<SpintaxEditorTabProps> = ({
                   <Plus size={12} className="mr-1" /> Choice
                 </button>
               </div>
-              {/* Clear All Button */}
-              <button
-                onClick={handleClearAll}
-                className="px-2 py-1 bg-red-100 text-red-800 rounded hover:bg-red-200 text-xs flex items-center"
-                title="Clear the entire editor content"
-              >
-                <Trash2 size={12} className="mr-1" /> Clear All
-              </button>
+              {/* Right side: History and Clear buttons */}
+              <div className="flex space-x-2 items-center">
+                {" "}
+                {/* Added closing div below */}
+                {/* Undo Button */}
+                <button
+                  onClick={handleUndo}
+                  disabled={history.length === 0}
+                  className="px-2 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 text-xs flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Undo last action"
+                >
+                  <Undo size={12} className="mr-1" /> Undo
+                </button>
+                {/* Redo Button */}
+                <button
+                  onClick={handleRedo}
+                  disabled={redoStack.length === 0}
+                  className="px-2 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 text-xs flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Redo last undone action"
+                >
+                  <Redo size={12} className="mr-1" /> Redo
+                </button>
+                {/* Clear All Button */}
+                <button
+                  onClick={handleClearAll}
+                  className="px-2 py-1 bg-red-100 text-red-800 rounded hover:bg-red-200 text-xs flex items-center"
+                  title="Clear the entire editor content"
+                >
+                  <Trash2 size={12} className="mr-1" /> Clear All
+                </button>
+              </div>{" "}
+              {/* Added missing closing div */}
             </div>
 
             {/* Editor Tree View Area */}
