@@ -1,0 +1,1 @@
+export { SpintaxEditor } from "./SpintaxEditor";

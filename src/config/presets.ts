@@ -12,4 +12,4 @@ callToAction: >-
   {Try it now|Get started today|See the magic for yourself} — 
   {no signup required|completely free|no strings attached}!`;
 
-export const exampleSpintax = `'{Spintax is|Spintax can be|Using spintax is} {a great way|an effective method|a powerful tool} to {create|generate|produce} {diverse|varied|unique} {content|phrasing|text} without {manually rewriting|repeating yourself|starting from scratch}.'`;
+export const exampleSpintax = `{Spintax is|Spintax can be|Using spintax is} {a great way|an effective method|a powerful tool} to {create|generate|produce} {diverse|varied|unique} {content|phrasing|text} without {manually rewriting|repeating yourself|starting from scratch}.`;
