@@ -54,9 +54,9 @@ interface NodeContentDisplayProps {
 const NodeContentDisplay: React.FC<NodeContentDisplayProps> = ({ content }) => {
   const announcedContent = [
     {content: "", element: <span className="italic text-gray-400">empty text</span>},
-    {content: " ", element: <span className="italic">SPACE</span>},
-    {content: "\n", element: <span className="italic">NEWLINE</span>},
-    {content: "\t", element: <span className="italic">TAB</span>},
+    {content: " ", element: <span className="italic text-gray-400">SPACE</span>},
+    {content: "\n", element: <span className="italic text-gray-400">NEWLINE</span>},
+    {content: "\t", element: <span className="italic text-gray-400">TAB</span>},
   ]
   const specialContent = announcedContent.find(item => item.content === content);
   return <>{specialContent ? specialContent.element : content}</>;

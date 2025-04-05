@@ -19,7 +19,8 @@ import {
 import React, { useCallback, useState } from "react";
 import { ImportExportModal } from "./ImportExportModal";
 import { SpintaxEditorTab } from "./SpintaxEditorTab";
-
+import Image from "next/image";
+import editorLogo from "@/../public/logo.svg";
 /**
  * Main spintax editor component
  */
@@ -156,11 +157,23 @@ export const SpintaxEditor: React.FC = () => {
   return (
     <div className="w-full flex flex-col bg-gray-100 text-gray-800 font-sans h-screen max-h-screen">
       {/* Header Section */}
-      <header className="bg-blue-600 text-white p-3 shadow-md flex flex-wrap justify-between items-center flex-shrink-0 gap-2">
+      <header className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-3 shadow-md flex flex-wrap justify-between items-center flex-shrink-0 gap-2">
         {/* Title */}
-        <div className="flex-shrink-0">
-          <h1 className="text-xl font-bold">Advanced Spintax Editor</h1>
-          <p className="text-xs opacity-80">Visual tree editor for spintax</p>
+        <div className="flex flex-row items-center space-x-2">
+          <div>
+            <Image
+              src={editorLogo}
+              alt="Spintax Editor Logo"
+              width={42}
+              height={42}
+              className="mr-2 pt-1"
+              // priority
+            />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold">Spintax Editor</h1>
+            <p className="text-xs opacity-80">Visual tree editor for spintax</p>
+          </div>
         </div>
 
         {/* Action Buttons */}

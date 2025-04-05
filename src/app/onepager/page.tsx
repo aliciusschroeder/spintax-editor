@@ -1484,7 +1484,7 @@ const SpintaxEditorComponent: React.FC = () => { // Use React.FC for component t
   return (
     <div className="w-full flex flex-col bg-gray-100 text-gray-800 font-sans h-screen max-h-screen">
       {/* Header Section */}
-      <header className="bg-blue-600 text-white p-3 shadow-md flex flex-wrap justify-between items-center flex-shrink-0 gap-2">
+      <header className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-3 shadow-md flex flex-wrap justify-between items-center flex-shrink-0 gap-2">
         {/* Title */}
         <div className="flex-shrink-0">
           <h1 className="text-xl font-bold">Advanced Spintax Editor</h1>
@@ -1493,27 +1493,27 @@ const SpintaxEditorComponent: React.FC = () => { // Use React.FC for component t
         {/* Action Buttons */}
         <div className="flex space-x-2 flex-wrap gap-1">
           <button
-            onClick={() => setShowImportModal(true)}
-            className="px-3 py-1 bg-blue-700 hover:bg-blue-800 rounded text-sm flex items-center"
-            title="Import Spintax or YAML"
+        onClick={() => setShowImportModal(true)}
+        className="px-3 py-1 bg-blue-700 hover:bg-blue-800 rounded text-sm flex items-center"
+        title="Import Spintax or YAML"
           >
-            <Upload size={14} className="mr-1" /> Import
+        <Upload size={14} className="mr-1" /> Import
           </button>
           {Object.keys(entries).length > 0 && (
-            <button
-              onClick={handleExportYaml}
-              className="px-3 py-1 bg-blue-700 hover:bg-blue-800 rounded text-sm flex items-center"
-              title="Export all entries as YAML"
-            >
-              <Download size={14} className="mr-1" /> Export YAML
-            </button>
+        <button
+          onClick={handleExportYaml}
+          className="px-3 py-1 bg-blue-700 hover:bg-blue-800 rounded text-sm flex items-center"
+          title="Export all entries as YAML"
+        >
+          <Download size={14} className="mr-1" /> Export YAML
+        </button>
           )}
           <button
-            onClick={handleLoadDemo}
-            className="px-3 py-1 bg-green-500 hover:bg-green-600 rounded text-sm flex items-center"
-            title="Load example YAML data"
+        onClick={handleLoadDemo}
+        className="px-3 py-1 bg-green-500 hover:bg-green-600 rounded text-sm flex items-center"
+        title="Load example YAML data"
           >
-            <FileCode size={14} className="mr-1" /> Load Demo
+        <FileCode size={14} className="mr-1" /> Load Demo
           </button>
         </div>
       </header>
