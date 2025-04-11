@@ -3,6 +3,7 @@
  *
  * A custom hook for managing a spintax tree structure.
  * Provides functionality for creating, updating, deleting, and navigating nodes.
+ * Includes history management for undo/redo functionality.
  */
 
 import {
@@ -42,6 +43,12 @@ interface UseSpintaxTreeReturn {
   /** Any error that occurred during parsing or generation */
   error: string | null;
 
+  /** History array for undo functionality */
+  history: RootNode[];
+
+  /** Redo stack for redo functionality */
+  redoStack: RootNode[];
+
   /** Update the tree with a new spintax string */
   setSpintaxString: (spintax: string) => void;
 
@@ -67,10 +74,22 @@ interface UseSpintaxTreeReturn {
 
   /** Add a new choice node to the root */
   addChoiceToRoot: (options?: string[]) => void;
+
+  /** Undo the last change */
+  undo: () => void;
+
+  /** Redo the last undone change */
+  redo: () => void;
+
+  /** Clear all content in the tree */
+  clearAll: () => void;
 }
 
+// Maximum number of history entries to keep
+const MAX_HISTORY_SIZE = 50;
+
 /**
- * Custom hook for managing a spintax tree
+ * Custom hook for managing a spintax tree with history
  *
  * @param initialSpintax - Initial spintax string to parse
  * @returns An object with the tree and functions to manipulate it
@@ -90,6 +109,10 @@ export const useSpintaxTree = (
       return { type: "root", children: [] };
     }
   });
+
+  // History management state
+  const [history, setHistory] = useState<RootNode[]>([]);
+  const [redoStack, setRedoStack] = useState<RootNode[]>([]);
 
   // Derived state
   const [spintaxString, setSpintaxStringState] = useState<string>(() => {
@@ -140,19 +163,37 @@ export const useSpintaxTree = (
     updateDerivedState(tree);
   }, [tree, updateDerivedState]);
 
-  // Set a new spintax string and parse it into a tree
-  const setSpintaxString = useCallback((spintax: string) => {
-    try {
-      setError(null);
-      const newTree = parseSpintax(spintax);
-      setTree(newTree);
-      // Derived state will be updated by the useEffect
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : "Unknown error";
-      setError(`Error parsing spintax: ${errorMsg}`);
-      console.error("Error parsing spintax:", e);
-    }
+  // Helper function to add an entry to history
+  const addToHistory = useCallback((prevTree: RootNode) => {
+    setHistory((prev) => {
+      const newHistory = [prevTree, ...prev];
+      if (newHistory.length > MAX_HISTORY_SIZE) {
+        return newHistory.slice(0, MAX_HISTORY_SIZE);
+      }
+      return newHistory;
+    });
+    // Clear redo stack on new action
+    setRedoStack([]);
   }, []);
+
+  // Set a new spintax string and parse it into a tree
+  const setSpintaxString = useCallback(
+    (spintax: string) => {
+      try {
+        setError(null);
+        // Add current tree to history before updating
+        addToHistory(tree);
+        const newTree = parseSpintax(spintax);
+        setTree(newTree);
+        // Derived state will be updated by the useEffect
+      } catch (e) {
+        const errorMsg = e instanceof Error ? e.message : "Unknown error";
+        setError(`Error parsing spintax: ${errorMsg}`);
+        console.error("Error parsing spintax:", e);
+      }
+    },
+    [tree, addToHistory]
+  );
 
   // Update a node at the specified path
   const updateNode = useCallback(
@@ -162,6 +203,9 @@ export const useSpintaxTree = (
         | SpintaxNode
         | ((currentNode: SpintaxNode | null) => SpintaxNode | null)
     ) => {
+      // Add current tree to history before updating
+      addToHistory(tree);
+
       setTree((prevTree) => {
         try {
           return produce(prevTree, (draft) => {
@@ -186,46 +230,71 @@ export const useSpintaxTree = (
               return;
             }
 
-            // Get the current node to update
-            const currentNode = getNodeByPathInDraft(draft, path);
+            // Handle function-based node updates
+            const currentNodeInDraft =
+              typeof newNodeOrFn === "function"
+                ? getNodeByPathInDraft(draft, path)
+                : null;
 
-            // Calculate the new node
             const newNode =
               typeof newNodeOrFn === "function"
-                ? newNodeOrFn(currentNode)
+                ? newNodeOrFn(currentNodeInDraft)
                 : newNodeOrFn;
 
             if (!newNode) {
-              return;
-            }
-
-            // Get the parent path and index
-            const parentPath = path.slice(0, -2);
-            const parentNode = getNodeByPathInDraft(draft, parentPath);
-
-            if (!parentNode) {
-              throw new Error("Parent node not found");
-            }
-
-            if (
-              !(
-                parentNode.type === "root" ||
-                parentNode.type === "choice" ||
-                parentNode.type === "option"
-              )
-            ) {
-              throw new Error(
-                `Parent node of type ${parentNode.type} cannot have children`
+              console.warn(
+                "Update function returned null, aborting update for path:",
+                path
               );
+              return; // Early return in Immer doesn't modify state
             }
 
+            // Navigate to the parent node
+            const parentPath = path.slice(0, -2);
+            const parentProperty = path[path.length - 2];
             const nodeIndex = path[path.length - 1] as number;
 
+            const parent = getNodeByPathInDraft(draft, parentPath);
+
             // Update the node in the parent's children array
-            if (nodeIndex >= 0 && nodeIndex < parentNode.children.length) {
-              parentNode.children[nodeIndex] = newNode;
+            if (
+              parent &&
+              parentProperty === "children" &&
+              (parent.type === "root" ||
+                parent.type === "choice" ||
+                parent.type === "option")
+            ) {
+              if (
+                Array.isArray(parent.children) &&
+                parent.children.length > nodeIndex &&
+                nodeIndex >= 0
+              ) {
+                parent.children[nodeIndex] = newNode;
+              } else {
+                console.error(
+                  "Invalid target for update: Index out of bounds.",
+                  "Parent:",
+                  parent,
+                  "Property:",
+                  parentProperty,
+                  "Index:",
+                  nodeIndex
+                );
+                throw new Error(
+                  `Invalid target location for node update: Index out of bounds`
+                );
+              }
             } else {
-              throw new Error("Invalid path or index out of bounds");
+              console.error(
+                "Invalid target for update:",
+                "Parent:",
+                parent,
+                "Property:",
+                parentProperty,
+                "Index:",
+                nodeIndex
+              );
+              throw new Error(`Invalid target location for node update`);
             }
           });
         } catch (e) {
@@ -237,104 +306,156 @@ export const useSpintaxTree = (
       });
       // Derived state will be updated by the useEffect
     },
-    []
+    [tree, addToHistory]
   );
 
   // Delete a node at the specified path
-  const deleteNode = useCallback((path: SpintaxPath) => {
-    if (!path || path.length < 2) {
-      setError("Cannot delete root node");
-      return;
-    }
-
-    setTree((prevTree) => {
-      try {
-        return produce(prevTree, (draft) => {
-          const parentPath = path.slice(0, -2);
-          const parentNode = getNodeByPathInDraft(draft, parentPath);
-
-          if (!parentNode) {
-            throw new Error("Parent node not found");
-          }
-
-          if (
-            !(
-              parentNode.type === "root" ||
-              parentNode.type === "choice" ||
-              parentNode.type === "option"
-            )
-          ) {
-            throw new Error(
-              `Parent node of type ${parentNode.type} cannot have children`
-            );
-          }
-
-          const nodeIndex = path[path.length - 1] as number;
-
-          // Delete the node from the parent's children array
-          if (nodeIndex >= 0 && nodeIndex < parentNode.children.length) {
-            parentNode.children.splice(nodeIndex, 1);
-          } else {
-            throw new Error("Invalid path or index out of bounds");
-          }
-        });
-      } catch (e) {
-        const errorMsg = e instanceof Error ? e.message : "Unknown error";
-        setError(`Error deleting node: ${errorMsg}`);
-        console.error("Error deleting node:", e);
-        return prevTree;
+  const deleteNode = useCallback(
+    (path: SpintaxPath) => {
+      if (!path || path.length < 2) {
+        setError("Cannot delete root node");
+        return;
       }
-    });
-    // Derived state will be updated by the useEffect
-  }, []);
+
+      // Add current tree to history before deleting
+      addToHistory(tree);
+
+      setTree((prevTree) => {
+        try {
+          return produce(prevTree, (draft) => {
+            // Navigate to parent node
+            const parentPath = path.slice(0, -2);
+            const parent = getNodeByPathInDraft(draft, parentPath);
+
+            const parentProperty = path[path.length - 2];
+            const nodeIndex = path[path.length - 1] as number;
+
+            // Delete the node from the parent's children array
+            if (
+              parent &&
+              parentProperty === "children" &&
+              (parent.type === "root" ||
+                parent.type === "choice" ||
+                parent.type === "option")
+            ) {
+              if (
+                Array.isArray(parent.children) &&
+                parent.children.length > nodeIndex &&
+                nodeIndex >= 0
+              ) {
+                parent.children.splice(nodeIndex, 1);
+              } else {
+                console.error(
+                  "Invalid target for delete: Index out of bounds.",
+                  "Parent:",
+                  parent,
+                  "Property:",
+                  parentProperty,
+                  "Index:",
+                  nodeIndex
+                );
+                throw new Error(
+                  `Invalid target location for node deletion: Index out of bounds`
+                );
+              }
+            } else {
+              console.error(
+                "Invalid target for delete:",
+                "Parent:",
+                parent,
+                "Property:",
+                parentProperty,
+                "Index:",
+                nodeIndex
+              );
+              throw new Error(`Invalid target location for node deletion`);
+            }
+          });
+        } catch (e) {
+          const errorMsg = e instanceof Error ? e.message : "Unknown error";
+          setError(`Error deleting node: ${errorMsg}`);
+          console.error("Error deleting node:", e);
+          return prevTree;
+        }
+      });
+      // Derived state will be updated by the useEffect
+    },
+    [tree, addToHistory]
+  );
 
   // Add a new node at the specified path
-  const addNode = useCallback((path: SpintaxPath, newNode: SpintaxNode) => {
-    if (!path || path.length < 2 || !newNode) {
-      setError("Invalid path or node");
-      return;
-    }
-
-    setTree((prevTree) => {
-      try {
-        return produce(prevTree, (draft) => {
-          const parentPath = path.slice(0, -2);
-          const parentNode = getNodeByPathInDraft(draft, parentPath);
-
-          if (!parentNode) {
-            throw new Error("Parent node not found");
-          }
-
-          if (
-            !(
-              parentNode.type === "root" ||
-              parentNode.type === "choice" ||
-              parentNode.type === "option"
-            )
-          ) {
-            throw new Error(
-              `Parent node of type ${parentNode.type} cannot have children`
-            );
-          }
-
-          const nodeIndex = path[path.length - 1] as number;
-
-          // Add the node to the parent's children array
-          const validIndex = Math.max(
-            0,
-            Math.min(nodeIndex, parentNode.children.length)
-          );
-          parentNode.children.splice(validIndex, 0, newNode);
-        });
-      } catch (e) {
-        const errorMsg = e instanceof Error ? e.message : "Unknown error";
-        setError(`Error adding node: ${errorMsg}`);
-        console.error("Error adding node:", e);
-        return prevTree;
+  const addNode = useCallback(
+    (path: SpintaxPath, newNode: SpintaxNode) => {
+      if (!path || path.length < 2 || !newNode) {
+        setError("Invalid path or node");
+        return;
       }
-    });
-    // Derived state will be updated by the useEffect
-  }, []);
+
+      // Add current tree to history before adding
+      addToHistory(tree);
+
+      setTree((prevTree) => {
+        try {
+          return produce(prevTree, (draft) => {
+            // Navigate to parent node
+            const parentPath = path.slice(0, -2);
+            const parent = getNodeByPathInDraft(draft, parentPath);
+
+            const parentProperty = path[path.length - 2];
+            const targetIndex = path[path.length - 1] as number;
+
+            // Add the node to the parent's children array
+            if (
+              parent &&
+              parentProperty === "children" &&
+              (parent.type === "root" ||
+                parent.type === "choice" ||
+                parent.type === "option")
+            ) {
+              if (Array.isArray(parent.children)) {
+                const validIndex = Math.max(
+                  0,
+                  Math.min(targetIndex, parent.children.length)
+                );
+                parent.children.splice(validIndex, 0, newNode);
+              } else {
+                console.error(
+                  "Invalid target for add: Parent children is not an array.",
+                  "Parent:",
+                  parent,
+                  "Property:",
+                  parentProperty,
+                  "Index:",
+                  targetIndex
+                );
+                throw new Error(
+                  `Invalid target location for node addition: Children not an array`
+                );
+              }
+            } else {
+              console.error(
+                "Invalid target for add:",
+                "Parent:",
+                parent,
+                "Property:",
+                parentProperty,
+                "Index:",
+                targetIndex
+              );
+              throw new Error(`Invalid target location for node addition`);
+            }
+          });
+        } catch (e) {
+          const errorMsg = e instanceof Error ? e.message : "Unknown error";
+          setError(`Error adding node: ${errorMsg}`);
+          console.error("Error adding node:", e);
+          return prevTree;
+        }
+      });
+      // Derived state will be updated by the useEffect
+    },
+    [tree, addToHistory]
+  );
 
   // Generate a new random variant
   const generateVariant = useCallback(() => {
@@ -349,53 +470,102 @@ export const useSpintaxTree = (
   }, [tree]);
 
   // Add a new text node to the root
-  const addTextToRoot = useCallback((content: string = "new text") => {
-    const newTextNode: TextNode = { type: "text", content };
+  const addTextToRoot = useCallback(
+    (content: string = "new text") => {
+      const newTextNode: TextNode = { type: "text", content };
 
-    setTree((prevTree) => {
-      try {
-        return produce(prevTree, (draft) => {
-          // Add the text node to the root's children array
-          draft.children.push(newTextNode);
-        });
-      } catch (e) {
-        const errorMsg = e instanceof Error ? e.message : "Unknown error";
-        setError(`Error adding text to root: ${errorMsg}`);
-        console.error("Error adding text to root:", e);
-        return prevTree;
-      }
-    });
-    // Derived state will be updated by the useEffect
-  }, []);
+      // Add current tree to history before adding
+      addToHistory(tree);
+
+      setTree((prevTree) => {
+        try {
+          return produce(prevTree, (draft) => {
+            // Add the text node to the root's children array
+            draft.children.push(newTextNode);
+          });
+        } catch (e) {
+          const errorMsg = e instanceof Error ? e.message : "Unknown error";
+          setError(`Error adding text to root: ${errorMsg}`);
+          console.error("Error adding text to root:", e);
+          return prevTree;
+        }
+      });
+      // Derived state will be updated by the useEffect
+    },
+    [tree, addToHistory]
+  );
 
   // Add a new choice node to the root
-  const addChoiceToRoot = useCallback((options: string[] = ["A", "B"]) => {
-    const optionNodes: OptionNode[] = options.map((text) => ({
-      type: "option",
-      content: text,
-      children: [],
-    }));
+  const addChoiceToRoot = useCallback(
+    (options: string[] = ["A", "B"]) => {
+      const optionNodes: OptionNode[] = options.map((text) => ({
+        type: "option",
+        content: text,
+        children: [],
+      }));
 
-    const newChoiceNode: ChoiceNode = {
-      type: "choice",
-      children: optionNodes,
-    };
+      const newChoiceNode: ChoiceNode = {
+        type: "choice",
+        children: optionNodes,
+      };
 
-    setTree((prevTree) => {
-      try {
-        return produce(prevTree, (draft) => {
-          // Add the choice node to the root's children array
-          draft.children.push(newChoiceNode);
-        });
-      } catch (e) {
-        const errorMsg = e instanceof Error ? e.message : "Unknown error";
-        setError(`Error adding choice to root: ${errorMsg}`);
-        console.error("Error adding choice to root:", e);
-        return prevTree;
-      }
-    });
-    // Derived state will be updated by the useEffect
-  }, []);
+      // Add current tree to history before adding
+      addToHistory(tree);
+
+      setTree((prevTree) => {
+        try {
+          return produce(prevTree, (draft) => {
+            // Add the choice node to the root's children array
+            draft.children.push(newChoiceNode);
+          });
+        } catch (e) {
+          const errorMsg = e instanceof Error ? e.message : "Unknown error";
+          setError(`Error adding choice to root: ${errorMsg}`);
+          console.error("Error adding choice to root:", e);
+          return prevTree;
+        }
+      });
+      // Derived state will be updated by the useEffect
+    },
+    [tree, addToHistory]
+  );
+
+  // Undo the last change
+  const undo = useCallback(() => {
+    if (history.length === 0) return;
+
+    const previousState = history[0];
+    const newHistory = history.slice(1);
+
+    setRedoStack((prevRedo) => [tree, ...prevRedo]);
+    setHistory(newHistory);
+    setTree(previousState);
+  }, [history, tree]);
+
+  // Redo the last undone change
+  const redo = useCallback(() => {
+    if (redoStack.length === 0) return;
+
+    const nextState = redoStack[0];
+    const newRedoStack = redoStack.slice(1);
+
+    setHistory((prevHistory) => [tree, ...prevHistory]);
+    setRedoStack(newRedoStack);
+    setTree(nextState);
+  }, [redoStack, tree]);
+
+  // Clear all content in the tree
+  const clearAll = useCallback(() => {
+    // Add current tree to history before clearing
+    addToHistory(tree);
+
+    setTree(
+      produce((draft) => {
+        draft.children = [];
+      })
+    );
+    setError(null);
+  }, [tree, addToHistory]);
 
   return {
     tree,
@@ -403,6 +573,8 @@ export const useSpintaxTree = (
     variationCount,
     randomVariant,
     error,
+    history,
+    redoStack,
     setSpintaxString,
     updateNode,
     deleteNode,
@@ -410,5 +582,8 @@ export const useSpintaxTree = (
     generateVariant,
     addTextToRoot,
     addChoiceToRoot,
+    undo,
+    redo,
+    clearAll,
   };
 };
