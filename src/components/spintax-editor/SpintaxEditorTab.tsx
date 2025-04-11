@@ -5,17 +5,8 @@
  * Contains tab navigation for different views of the same spintax.
  */
 
+import { useSpintaxTree } from "@/hooks";
 import {
-  calculateVariations,
-  generateRandomVariant,
-  generateSpintax,
-  parseSpintax,
-} from "@/lib/spintax";
-import { getNodeByPathInDraft } from "@/lib/treeUtils";
-import { RootNode, SpintaxNode, SpintaxPath } from "@/types";
-import { produce } from "immer";
-import {
-  AlertCircle,
   Copy,
   Eye,
   FileText,
@@ -26,7 +17,7 @@ import {
   Trash2,
   Undo,
 } from "lucide-react";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { NodeEditor } from "./NodeEditor";
 
 /**
@@ -40,8 +31,6 @@ export interface SpintaxEditorTabProps {
   onUpdate?: (newSpintax: string) => void;
 }
 
-const MAX_HISTORY_SIZE = 50; // Limit history size
-
 /**
  * Component for editing, previewing, and exporting a single spintax entry
  */
@@ -49,428 +38,35 @@ export const SpintaxEditorTab: React.FC<SpintaxEditorTabProps> = ({
   initialSpintax = "",
   onUpdate,
 }) => {
-  // State for the spintax tree structure (current state)
-  const [spintaxTree, setSpintaxTree] = useState<RootNode>(() => {
-    try {
-      return parseSpintax(initialSpintax);
-    } catch (e) {
-      console.error("Initial parse error:", e);
-      return { type: "root", children: [] };
-    }
-  });
+  // Use the spintax tree hook
+  const {
+    tree: spintaxTree,
+    spintaxString: outputText,
+    variationCount,
+    randomVariant: randomPreview,
+    error: parseError,
+    history,
+    redoStack,
+    updateNode,
+    deleteNode,
+    addNode,
+    generateVariant: generatePreview,
+    undo: handleUndo,
+    redo: handleRedo,
+    clearAll: handleClearAll,
+  } = useSpintaxTree(initialSpintax);
 
-  // History state
-  const [history, setHistory] = useState<RootNode[]>([]);
-  const [redoStack, setRedoStack] = useState<RootNode[]>([]);
-
-  // Additional state
-  const [outputText, setOutputText] = useState<string>("");
-  const [randomPreview, setRandomPreview] = useState<string>("");
-  const [variationCount, setVariationCount] = useState<
-    number | typeof Infinity
-  >(() => {
-    try {
-      const initialTree = parseSpintax(initialSpintax);
-      const vars = calculateVariations(initialTree);
-      return vars === Infinity ? Infinity : typeof vars === "number" ? vars : 0;
-    } catch (e) {
-      console.error("Initial variation calculation error:", e);
-      return 0;
-    }
-  });
+  // UI State
   const [activeTab, setActiveTab] = useState<"editor" | "preview" | "export">(
     "editor"
   );
-  const [parseError, setParseError] = useState<string | null>(null);
 
-  // Effect to re-parse when initialSpintax prop changes
+  // Call onUpdate when the output text changes
   useEffect(() => {
-    try {
-      setParseError(null);
-      const tree = parseSpintax(initialSpintax);
-      setSpintaxTree(tree);
-      setRandomPreview(""); // Reset preview
-      setOutputText(generateSpintax(tree));
-      const vars = calculateVariations(tree);
-      setVariationCount(
-        vars === Infinity ? Infinity : typeof vars === "number" ? vars : 0
-      );
-    } catch (error: unknown) {
-      console.error("Error parsing spintax in useEffect:", error);
-      const errorMsg =
-        error instanceof Error ? error.message : "Unknown error during parsing";
-      setParseError(`Error parsing spintax: ${errorMsg}`);
-      setSpintaxTree({ type: "root", children: [] });
-      setOutputText("");
-      setVariationCount(0);
+    if (onUpdate && outputText !== initialSpintax) {
+      onUpdate(outputText);
     }
-  }, [initialSpintax]);
-
-  // Effect to update output text, variation count, and call onUpdate when the tree changes
-  useEffect(() => {
-    if (!spintaxTree) {
-      setOutputText("");
-      setVariationCount(0);
-      return;
-    }
-
-    let currentOutput = "";
-    let currentVariationsResult: number | typeof Infinity = 0;
-    let errorOccurred = false;
-
-    try {
-      currentOutput = generateSpintax(spintaxTree);
-    } catch (error: unknown) {
-      console.error("Error generating spintax:", error);
-      currentOutput = `<Error generating spintax: ${
-        error instanceof Error ? error.message : "Unknown error"
-      }>`;
-      errorOccurred = true;
-    }
-
-    try {
-      currentVariationsResult = calculateVariations(spintaxTree);
-      setVariationCount(
-        currentVariationsResult === Infinity
-          ? Infinity
-          : typeof currentVariationsResult === "number"
-          ? currentVariationsResult
-          : 0
-      );
-    } catch (error: unknown) {
-      console.error("Error calculating variations:", error);
-      const isOverflow = error instanceof Error && error.message === "Overflow";
-      setVariationCount(isOverflow ? Infinity : 0);
-      errorOccurred = true;
-    }
-
-    setOutputText(currentOutput);
-
-    // Avoid calling onUpdate if an error occurred during generation/calculation
-    if (onUpdate && !errorOccurred) {
-      let initialOutputFromProp = "";
-      try {
-        initialOutputFromProp = generateSpintax(
-          parseSpintax(initialSpintax || "")
-        );
-      } catch {
-        /* Ignore parse error of initial prop here */
-      }
-
-      if (currentOutput !== initialOutputFromProp) {
-        onUpdate(currentOutput);
-      }
-    }
-  }, [spintaxTree, onUpdate, initialSpintax]);
-
-  // Callback for NodeEditor to update a node
-  const updateNode = useCallback(
-    (
-      path: SpintaxPath,
-      newNodeOrFunction:
-        | SpintaxNode
-        | ((currentNode: SpintaxNode | null) => SpintaxNode | null)
-    ) => {
-      // --- History Management ---
-      setHistory((prevHistory) => {
-        const newHistory = [spintaxTree, ...prevHistory];
-        if (newHistory.length > MAX_HISTORY_SIZE) {
-          newHistory.pop(); // Remove oldest entry if limit exceeded
-        }
-        return newHistory;
-      });
-      setRedoStack([]); // Clear redo stack on new action
-      // --- End History Management ---
-
-      setSpintaxTree((prevTree: RootNode): RootNode => {
-        try {
-          return produce(prevTree, (draft) => {
-            // Handle function-based node updates
-            const currentNodeInDraft =
-              typeof newNodeOrFunction === "function"
-                ? getNodeByPathInDraft(draft, path)
-                : null;
-
-            const newNode =
-              typeof newNodeOrFunction === "function"
-                ? newNodeOrFunction(currentNodeInDraft)
-                : newNodeOrFunction;
-
-            if (!newNode) {
-              console.warn(
-                "Update function returned null, aborting update for path:",
-                path
-              );
-              return; // Early return in Immer doesn't modify state
-            }
-
-            // Handle root node update
-            if (path.length === 0) {
-              if (newNode.type === "root") {
-                Object.assign(draft, newNode);
-                return;
-              } else {
-                console.error(
-                  "Attempted to replace root node with a non-root node:",
-                  newNode.type
-                );
-                return;
-              }
-            }
-
-            // Navigate to the parent node
-            const parentPath = path.slice(0, -2);
-            const parentProperty = path[path.length - 2];
-            const nodeIndex = path[path.length - 1] as number;
-
-            const parent = getNodeByPathInDraft(draft, parentPath);
-
-            // Update the node in the parent's children array
-            if (
-              parent &&
-              parentProperty === "children" &&
-              (parent.type === "root" ||
-                parent.type === "choice" ||
-                parent.type === "option")
-            ) {
-              if (
-                Array.isArray(parent.children) &&
-                parent.children.length > nodeIndex &&
-                nodeIndex >= 0
-              ) {
-                parent.children[nodeIndex] = newNode;
-              } else {
-                console.error(
-                  "Invalid target for update: Index out of bounds.",
-                  "Parent:",
-                  parent,
-                  "Property:",
-                  parentProperty,
-                  "Index:",
-                  nodeIndex
-                );
-                throw new Error(
-                  `Invalid target location for node update: Index out of bounds`
-                );
-              }
-            } else {
-              console.error(
-                "Invalid target for update:",
-                "Parent:",
-                parent,
-                "Property:",
-                parentProperty,
-                "Index:",
-                nodeIndex
-              );
-              throw new Error(`Invalid target location for node update`);
-            }
-          });
-        } catch (error: unknown) {
-          console.error(
-            "Update node failed:",
-            error,
-            "Path:",
-            path,
-            "Update:",
-            newNodeOrFunction
-          );
-          return prevTree;
-        }
-      });
-    },
-    [spintaxTree]
-  );
-
-  // Callback for NodeEditor to delete a node
-  const deleteNode = useCallback(
-    (path: SpintaxPath) => {
-      if (!path || path.length < 2) {
-        console.warn("Attempted to delete root node or invalid path:", path);
-        return;
-      }
-
-      // --- History Management ---
-      setHistory((prevHistory) => {
-        const newHistory = [spintaxTree, ...prevHistory];
-        if (newHistory.length > MAX_HISTORY_SIZE) {
-          newHistory.pop();
-        }
-        return newHistory;
-      });
-      setRedoStack([]);
-      // --- End History Management ---
-
-      setSpintaxTree((prevTree: RootNode): RootNode => {
-        try {
-          return produce(prevTree, (draft) => {
-            // Navigate to parent node
-            const parentPath = path.slice(0, -2);
-            const parent = getNodeByPathInDraft(draft, parentPath);
-
-            const parentProperty = path[path.length - 2];
-            const nodeIndex = path[path.length - 1] as number;
-
-            // Delete the node from the parent's children array
-            if (
-              parent &&
-              parentProperty === "children" &&
-              (parent.type === "root" ||
-                parent.type === "choice" ||
-                parent.type === "option")
-            ) {
-              if (
-                Array.isArray(parent.children) &&
-                parent.children.length > nodeIndex &&
-                nodeIndex >= 0
-              ) {
-                parent.children.splice(nodeIndex, 1);
-              } else {
-                console.error(
-                  "Invalid target for delete: Index out of bounds.",
-                  "Parent:",
-                  parent,
-                  "Property:",
-                  parentProperty,
-                  "Index:",
-                  nodeIndex
-                );
-                throw new Error(
-                  `Invalid target location for node deletion: Index out of bounds`
-                );
-              }
-            } else {
-              console.error(
-                "Invalid target for delete:",
-                "Parent:",
-                parent,
-                "Property:",
-                parentProperty,
-                "Index:",
-                nodeIndex
-              );
-              throw new Error(`Invalid target location for node deletion`);
-            }
-          });
-        } catch (error: unknown) {
-          console.error("Delete node failed:", error, "Path:", path);
-          return prevTree;
-        }
-      });
-    },
-    [spintaxTree]
-  );
-
-  // Callback for NodeEditor to add a node
-  const addNode = useCallback(
-    (path: SpintaxPath, newNode: SpintaxNode) => {
-      if (!path || path.length < 2 || !newNode) {
-        console.warn(
-          "Invalid arguments for addNode:",
-          "Path:",
-          path,
-          "Node:",
-          newNode
-        );
-        return;
-      }
-
-      // --- History Management ---
-      setHistory((prevHistory) => {
-        const newHistory = [spintaxTree, ...prevHistory];
-        if (newHistory.length > MAX_HISTORY_SIZE) {
-          newHistory.pop();
-        }
-        return newHistory;
-      });
-      setRedoStack([]);
-      // --- End History Management ---
-
-      setSpintaxTree((prevTree: RootNode): RootNode => {
-        try {
-          return produce(prevTree, (draft) => {
-            // Navigate to parent node
-            const parentPath = path.slice(0, -2);
-            const parent = getNodeByPathInDraft(draft, parentPath);
-
-            const parentProperty = path[path.length - 2];
-            const targetIndex = path[path.length - 1] as number;
-
-            // Add the node to the parent's children array
-            if (
-              parent &&
-              parentProperty === "children" &&
-              (parent.type === "root" ||
-                parent.type === "choice" ||
-                parent.type === "option")
-            ) {
-              if (Array.isArray(parent.children)) {
-                const validIndex = Math.max(
-                  0,
-                  Math.min(targetIndex, parent.children.length)
-                );
-                parent.children.splice(validIndex, 0, newNode);
-              } else {
-                console.error(
-                  "Invalid target for add: Parent children is not an array.",
-                  "Parent:",
-                  parent,
-                  "Property:",
-                  parentProperty,
-                  "Index:",
-                  targetIndex
-                );
-                throw new Error(
-                  `Invalid target location for node addition: Children not an array`
-                );
-              }
-            } else {
-              console.error(
-                "Invalid target for add:",
-                "Parent:",
-                parent,
-                "Property:",
-                parentProperty,
-                "Index:",
-                targetIndex
-              );
-              throw new Error(`Invalid target location for node addition`);
-            }
-          });
-        } catch (error: unknown) {
-          console.error(
-            "Add node failed:",
-            error,
-            "Path:",
-            path,
-            "Node:",
-            newNode
-          );
-          return prevTree;
-        }
-      });
-    },
-    [spintaxTree]
-  );
-
-  // Generate a random preview variant
-  const generatePreview = useCallback(() => {
-    try {
-      if (!spintaxTree) {
-        setRandomPreview("");
-        return;
-      }
-      const preview = generateRandomVariant(spintaxTree);
-      setRandomPreview(preview);
-    } catch (error: unknown) {
-      console.error("Error generating preview:", error);
-      setRandomPreview(
-        `<Error generating preview: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }>`
-      );
-    }
-  }, [spintaxTree]);
+  }, [outputText, onUpdate, initialSpintax]);
 
   // Clipboard copy handler
   const handleCopyOutput = () => {
@@ -478,51 +74,6 @@ export const SpintaxEditorTab: React.FC<SpintaxEditorTabProps> = ({
       console.error("Failed to copy output text:", err);
     });
   };
-
-  // Clear all content handler
-  const handleClearAll = () => {
-    // --- History Management ---
-    setHistory((prevHistory) => {
-      const newHistory = [spintaxTree, ...prevHistory];
-      if (newHistory.length > MAX_HISTORY_SIZE) {
-        newHistory.pop();
-      }
-      return newHistory;
-    });
-    setRedoStack([]);
-    // --- End History Management ---
-
-    setSpintaxTree(
-      produce((draft) => {
-        draft.children = [];
-      })
-    );
-    setParseError(null);
-  };
-
-  // Undo handler
-  const handleUndo = useCallback(() => {
-    if (history.length === 0) return;
-
-    const previousState = history[0];
-    const newHistory = history.slice(1);
-
-    setRedoStack((prevRedo) => [spintaxTree, ...prevRedo]);
-    setHistory(newHistory);
-    setSpintaxTree(previousState);
-  }, [history, spintaxTree]);
-
-  // Redo handler
-  const handleRedo = useCallback(() => {
-    if (redoStack.length === 0) return;
-
-    const nextState = redoStack[0];
-    const newRedoStack = redoStack.slice(1);
-
-    setHistory((prevHistory) => [spintaxTree, ...prevHistory]);
-    setRedoStack(newRedoStack);
-    setSpintaxTree(nextState);
-  }, [redoStack, spintaxTree]);
 
   // Format variation count for display
   const displayVariationCount =
@@ -578,8 +129,6 @@ export const SpintaxEditorTab: React.FC<SpintaxEditorTabProps> = ({
             <div className="p-2 border-b flex justify-between items-center bg-gray-50 flex-wrap flex-shrink-0 gap-2">
               {/* Left side: Add buttons */}
               <div className="flex space-x-2 items-center mb-1 sm:mb-0">
-                {" "}
-                {/* Reverted mb-1 sm:mb-0 from original for consistency */}
                 <span className="text-sm font-medium mr-2 hidden sm:inline">
                   Add to Root:
                 </span>
@@ -615,8 +164,6 @@ export const SpintaxEditorTab: React.FC<SpintaxEditorTabProps> = ({
               </div>
               {/* Right side: History and Clear buttons */}
               <div className="flex space-x-2 items-center">
-                {" "}
-                {/* Added closing div below */}
                 {/* Undo Button */}
                 <button
                   onClick={handleUndo}
@@ -643,8 +190,7 @@ export const SpintaxEditorTab: React.FC<SpintaxEditorTabProps> = ({
                 >
                   <Trash2 size={12} className="mr-1" /> Clear All
                 </button>
-              </div>{" "}
-              {/* Added missing closing div */}
+              </div>
             </div>
 
             {/* Editor Tree View Area */}
@@ -776,3 +322,28 @@ export const SpintaxEditorTab: React.FC<SpintaxEditorTabProps> = ({
     </div>
   );
 };
+
+// Missing AlertCircle component import
+const AlertCircle = ({
+  size,
+  className,
+}: {
+  size: number;
+  className: string;
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <circle cx="12" cy="12" r="10"></circle>
+    <line x1="12" y1="8" x2="12" y2="12"></line>
+    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+  </svg>
+);

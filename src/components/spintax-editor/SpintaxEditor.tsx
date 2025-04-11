@@ -5,9 +5,8 @@
  * Manages multiple spintax entries, import/export functionality, and UI state.
  */
 
-import { exampleYaml } from "@/config/presets";
-import { generateYaml, parseYaml } from "@/lib/yaml";
-import { YamlEntries } from "@/types";
+import editorLogo from "@/../public/logo.svg";
+import { useYamlEntries } from "@/hooks";
 import {
   AlertCircle,
   Copy,
@@ -16,19 +15,28 @@ import {
   Plus,
   Upload,
 } from "lucide-react";
-import React, { useCallback, useState } from "react";
-import { ImportExportModal } from "./ImportExportModal";
-import { ConfirmReloadModal } from "./ConfirmReloadModal";
-import { SpintaxEditorTab } from "./SpintaxEditorTab";
 import Image from "next/image";
-import editorLogo from "@/../public/logo.svg";
+import React, { useState } from "react";
+import { ConfirmReloadModal } from "./ConfirmReloadModal";
+import { ImportExportModal } from "./ImportExportModal";
+import { SpintaxEditorTab } from "./SpintaxEditorTab";
+
 /**
  * Main spintax editor component
  */
 export const SpintaxEditor: React.FC = () => {
-  // State for managing entries
-  const [entries, setEntries] = useState<YamlEntries>({});
-  const [activeEntry, setActiveEntry] = useState<string | null>(null);
+  // Use the YAML entries hook
+  const {
+    entries,
+    activeEntry,
+    error,
+    setActiveEntry,
+    addEntry: handleAddEntry,
+    updateEntry,
+    loadDemo: handleLoadDemo,
+    handleImport,
+    exportToYaml,
+  } = useYamlEntries();
 
   // Modal states
   const [showConfirmReloadModal, setShowConfirmReloadModal] =
@@ -37,111 +45,15 @@ export const SpintaxEditor: React.FC = () => {
   const [yamlExport, setYamlExport] = useState<string>("");
   const [showYamlExport, setShowYamlExport] = useState<boolean>(false);
 
-  // Error state
-  const [error, setError] = useState<string | null>(null);
-
-  // Handler for importing data from the modal
-  const handleImport = ({
-    singleSpintax,
-    yamlEntries,
-  }: {
-    singleSpintax?: string;
-    yamlEntries?: YamlEntries;
-  }) => {
-    try {
-      setError(null);
-      let firstKey: string | null = null;
-
-      if (singleSpintax !== undefined) {
-        // Generate a unique key for single spintax import
-        const key = `spintax_${Date.now()}`;
-        setEntries({ [key]: singleSpintax });
-        firstKey = key;
-      } else if (yamlEntries && Object.keys(yamlEntries).length > 0) {
-        setEntries(yamlEntries);
-        firstKey = Object.keys(yamlEntries)[0];
-      } else {
-        console.warn("Import handler called with no data.");
-        return;
-      }
-
-      setActiveEntry(firstKey);
-    } catch (err: unknown) {
-      const errorMsg =
-        err instanceof Error
-          ? err.message
-          : "An unknown error occurred during import processing";
-      setError(`Import processing error: ${errorMsg}`);
-      console.error("Import handling error:", err);
-    }
-  };
-
-  // Callback to update the content of the active entry
-  const updateEntry = useCallback(
-    (value: string) => {
-      if (!activeEntry) return;
-
-      setEntries((prev) => ({
-        ...prev,
-        [activeEntry]: value,
-      }));
-    },
-    [activeEntry]
-  );
-
   // Export to YAML
   const handleExportYaml = () => {
     try {
-      setError(null);
-      const yaml = generateYaml(entries);
+      const yaml = exportToYaml();
       setYamlExport(yaml);
       setShowYamlExport(true);
-    } catch (err: unknown) {
-      const errorMsg =
-        err instanceof Error
-          ? err.message
-          : "An unknown error occurred during YAML export";
-      setError(`Export error: ${errorMsg}`);
+    } catch (err) {
       console.error("Export YAML error:", err);
     }
-  };
-
-  // Load demo data
-  const handleLoadDemo = () => {
-    try {
-      setError(null);
-      const demoEntries = parseYaml(exampleYaml);
-
-      if (!demoEntries || Object.keys(demoEntries).length === 0) {
-        throw new Error(
-          "No valid entries found in demo data. Check presets.ts."
-        );
-      }
-
-      setEntries(demoEntries);
-      setActiveEntry(Object.keys(demoEntries)[0]);
-    } catch (err: unknown) {
-      const errorMsg =
-        err instanceof Error
-          ? err.message
-          : "An unknown error occurred loading demo data";
-      setError(`Error loading demo: ${errorMsg}`);
-      console.error("Demo loading error:", err);
-    }
-  };
-
-  // Add new entry
-  const handleAddEntry = () => {
-    setError(null);
-    const key = `entry_${Date.now()}`;
-    const newEntryContent = "{New|Fresh|Brand new} {content|text|spintax} here";
-
-    setEntries((prev) => ({
-      ...prev,
-      [key]: newEntryContent,
-    }));
-
-    setActiveEntry(key);
   };
 
   // Copy the exported YAML to clipboard
@@ -153,7 +65,6 @@ export const SpintaxEditor: React.FC = () => {
       })
       .catch((err) => {
         console.error("Failed to copy YAML export:", err);
-        setError("Failed to copy YAML to clipboard. Please copy manually.");
       });
   };
 
@@ -220,7 +131,7 @@ export const SpintaxEditor: React.FC = () => {
             <span>{error}</span>
             {/* Button to dismiss the error */}
             <button
-              onClick={() => setError(null)}
+              onClick={() => null /* Error is managed by the hook */}
               className="ml-auto text-red-500 hover:text-red-700 text-lg font-bold leading-none px-1"
               aria-label="Dismiss error"
             >
@@ -240,7 +151,7 @@ export const SpintaxEditor: React.FC = () => {
               <h3 className="font-semibold text-sm uppercase">Entries</h3>
               {/* Add New Entry Button */}
               <button
-                onClick={handleAddEntry}
+                onClick={() => handleAddEntry()}
                 className="p-1 text-blue-500 hover:text-blue-700"
                 title="Add New Entry"
                 aria-label="Add new entry"
@@ -276,7 +187,7 @@ export const SpintaxEditor: React.FC = () => {
             <SpintaxEditorTab
               key={activeEntry}
               initialSpintax={entries[activeEntry]}
-              onUpdate={updateEntry}
+              onUpdate={(newContent) => updateEntry(activeEntry, newContent)}
             />
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center p-4 text-center bg-gray-50">
