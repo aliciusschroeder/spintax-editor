@@ -21,7 +21,7 @@ import {
   TextNode,
 } from "@/types";
 import { produce } from "immer";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 /**
  * Return type for the useSpintaxTree hook
@@ -116,24 +116,29 @@ export const useSpintaxTree = (
   const [randomVariant, setRandomVariant] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
-  // Update state from the tree
-  const updateStateFromTree = useCallback((newTree: RootNode) => {
+  // Update derived state based on the current tree
+  const updateDerivedState = useCallback((currentTree: RootNode) => {
     try {
       setError(null);
 
       // Generate spintax string
-      const newSpintaxString = generateSpintax(newTree);
+      const newSpintaxString = generateSpintax(currentTree);
       setSpintaxStringState(newSpintaxString);
 
       // Calculate variation count
-      const newVariationCount = calculateVariations(newTree);
+      const newVariationCount = calculateVariations(currentTree);
       setVariationCount(newVariationCount);
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : "Unknown error";
-      setError(`Error updating from tree: ${errorMsg}`);
-      console.error("Error updating from tree:", e);
+      setError(`Error updating derived state: ${errorMsg}`);
+      console.error("Error updating derived state:", e);
     }
   }, []);
+
+  // Update derived state whenever the tree changes
+  useEffect(() => {
+    updateDerivedState(tree);
+  }, [tree, updateDerivedState]);
 
   // Set a new spintax string and parse it into a tree
   const setSpintaxString = useCallback((spintax: string) => {
@@ -141,11 +146,7 @@ export const useSpintaxTree = (
       setError(null);
       const newTree = parseSpintax(spintax);
       setTree(newTree);
-      setSpintaxStringState(spintax);
-
-      // Calculate variation count
-      const newVariationCount = calculateVariations(newTree);
-      setVariationCount(newVariationCount);
+      // Derived state will be updated by the useEffect
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : "Unknown error";
       setError(`Error parsing spintax: ${errorMsg}`);
@@ -234,118 +235,106 @@ export const useSpintaxTree = (
           return prevTree;
         }
       });
-
-      // Update derived state after tree changes
-      updateStateFromTree(tree);
+      // Derived state will be updated by the useEffect
     },
-    [tree, updateStateFromTree]
+    []
   );
 
   // Delete a node at the specified path
-  const deleteNode = useCallback(
-    (path: SpintaxPath) => {
-      if (!path || path.length < 2) {
-        setError("Cannot delete root node");
-        return;
+  const deleteNode = useCallback((path: SpintaxPath) => {
+    if (!path || path.length < 2) {
+      setError("Cannot delete root node");
+      return;
+    }
+
+    setTree((prevTree) => {
+      try {
+        return produce(prevTree, (draft) => {
+          const parentPath = path.slice(0, -2);
+          const parentNode = getNodeByPathInDraft(draft, parentPath);
+
+          if (!parentNode) {
+            throw new Error("Parent node not found");
+          }
+
+          if (
+            !(
+              parentNode.type === "root" ||
+              parentNode.type === "choice" ||
+              parentNode.type === "option"
+            )
+          ) {
+            throw new Error(
+              `Parent node of type ${parentNode.type} cannot have children`
+            );
+          }
+
+          const nodeIndex = path[path.length - 1] as number;
+
+          // Delete the node from the parent's children array
+          if (nodeIndex >= 0 && nodeIndex < parentNode.children.length) {
+            parentNode.children.splice(nodeIndex, 1);
+          } else {
+            throw new Error("Invalid path or index out of bounds");
+          }
+        });
+      } catch (e) {
+        const errorMsg = e instanceof Error ? e.message : "Unknown error";
+        setError(`Error deleting node: ${errorMsg}`);
+        console.error("Error deleting node:", e);
+        return prevTree;
       }
-
-      setTree((prevTree) => {
-        try {
-          return produce(prevTree, (draft) => {
-            const parentPath = path.slice(0, -2);
-            const parentNode = getNodeByPathInDraft(draft, parentPath);
-
-            if (!parentNode) {
-              throw new Error("Parent node not found");
-            }
-
-            if (
-              !(
-                parentNode.type === "root" ||
-                parentNode.type === "choice" ||
-                parentNode.type === "option"
-              )
-            ) {
-              throw new Error(
-                `Parent node of type ${parentNode.type} cannot have children`
-              );
-            }
-
-            const nodeIndex = path[path.length - 1] as number;
-
-            // Delete the node from the parent's children array
-            if (nodeIndex >= 0 && nodeIndex < parentNode.children.length) {
-              parentNode.children.splice(nodeIndex, 1);
-            } else {
-              throw new Error("Invalid path or index out of bounds");
-            }
-          });
-        } catch (e) {
-          const errorMsg = e instanceof Error ? e.message : "Unknown error";
-          setError(`Error deleting node: ${errorMsg}`);
-          console.error("Error deleting node:", e);
-          return prevTree;
-        }
-      });
-
-      // Update derived state after tree changes
-      updateStateFromTree(tree);
-    },
-    [tree, updateStateFromTree]
-  );
+    });
+    // Derived state will be updated by the useEffect
+  }, []);
 
   // Add a new node at the specified path
-  const addNode = useCallback(
-    (path: SpintaxPath, newNode: SpintaxNode) => {
-      if (!path || path.length < 2 || !newNode) {
-        setError("Invalid path or node");
-        return;
-      }
+  const addNode = useCallback((path: SpintaxPath, newNode: SpintaxNode) => {
+    if (!path || path.length < 2 || !newNode) {
+      setError("Invalid path or node");
+      return;
+    }
 
-      setTree((prevTree) => {
-        try {
-          return produce(prevTree, (draft) => {
-            const parentPath = path.slice(0, -2);
-            const parentNode = getNodeByPathInDraft(draft, parentPath);
+    setTree((prevTree) => {
+      try {
+        return produce(prevTree, (draft) => {
+          const parentPath = path.slice(0, -2);
+          const parentNode = getNodeByPathInDraft(draft, parentPath);
 
-            if (!parentNode) {
-              throw new Error("Parent node not found");
-            }
+          if (!parentNode) {
+            throw new Error("Parent node not found");
+          }
 
-            if (
-              !(
-                parentNode.type === "root" ||
-                parentNode.type === "choice" ||
-                parentNode.type === "option"
-              )
-            ) {
-              throw new Error(
-                `Parent node of type ${parentNode.type} cannot have children`
-              );
-            }
-
-            const nodeIndex = path[path.length - 1] as number;
-
-            // Add the node to the parent's children array
-            const validIndex = Math.max(
-              0,
-              Math.min(nodeIndex, parentNode.children.length)
+          if (
+            !(
+              parentNode.type === "root" ||
+              parentNode.type === "choice" ||
+              parentNode.type === "option"
+            )
+          ) {
+            throw new Error(
+              `Parent node of type ${parentNode.type} cannot have children`
             );
-            parentNode.children.splice(validIndex, 0, newNode);
-          });
-        } catch (e) {
-          const errorMsg = e instanceof Error ? e.message : "Unknown error";
-          setError(`Error adding node: ${errorMsg}`);
-          console.error("Error adding node:", e);
-          return prevTree;
-        }
-      });
+          }
 
-      // Update derived state after tree changes
-      updateStateFromTree(tree);
-    },
-    [tree, updateStateFromTree]
-  );
+          const nodeIndex = path[path.length - 1] as number;
+
+          // Add the node to the parent's children array
+          const validIndex = Math.max(
+            0,
+            Math.min(nodeIndex, parentNode.children.length)
+          );
+          parentNode.children.splice(validIndex, 0, newNode);
+        });
+      } catch (e) {
+        const errorMsg = e instanceof Error ? e.message : "Unknown error";
+        setError(`Error adding node: ${errorMsg}`);
+        console.error("Error adding node:", e);
+        return prevTree;
+      }
+    });
+    // Derived state will be updated by the useEffect
+  }, []);
 
   // Generate a new random variant
   const generateVariant = useCallback(() => {
@@ -360,64 +349,53 @@ export const useSpintaxTree = (
   }, [tree]);
 
   // Add a new text node to the root
-  const addTextToRoot = useCallback(
-    (content: string = "new text") => {
-      const newTextNode: TextNode = { type: "text", content };
+  const addTextToRoot = useCallback((content: string = "new text") => {
+    const newTextNode: TextNode = { type: "text", content };
 
-      setTree((prevTree) => {
-        try {
-          return produce(prevTree, (draft) => {
-            // Add the text node to the root's children array
-            draft.children.push(newTextNode);
-          });
-        } catch (e) {
-          const errorMsg = e instanceof Error ? e.message : "Unknown error";
-          setError(`Error adding text to root: ${errorMsg}`);
-          console.error("Error adding text to root:", e);
-          return prevTree;
-        }
-      });
-
-      // Update derived state after tree changes
-      updateStateFromTree(tree);
-    },
-    [tree, updateStateFromTree]
-  );
+    setTree((prevTree) => {
+      try {
+        return produce(prevTree, (draft) => {
+          // Add the text node to the root's children array
+          draft.children.push(newTextNode);
+        });
+      } catch (e) {
+        const errorMsg = e instanceof Error ? e.message : "Unknown error";
+        setError(`Error adding text to root: ${errorMsg}`);
+        console.error("Error adding text to root:", e);
+        return prevTree;
+      }
+    });
+    // Derived state will be updated by the useEffect
+  }, []);
 
   // Add a new choice node to the root
-  // Add a new choice node to the root
-  const addChoiceToRoot = useCallback(
-    (options: string[] = ["A", "B"]) => {
-      const optionNodes: OptionNode[] = options.map((text) => ({
-        type: "option",
-        content: text,
-        children: [],
-      }));
+  const addChoiceToRoot = useCallback((options: string[] = ["A", "B"]) => {
+    const optionNodes: OptionNode[] = options.map((text) => ({
+      type: "option",
+      content: text,
+      children: [],
+    }));
 
-      const newChoiceNode: ChoiceNode = {
-        type: "choice",
-        children: optionNodes,
-      };
+    const newChoiceNode: ChoiceNode = {
+      type: "choice",
+      children: optionNodes,
+    };
 
-      setTree((prevTree) => {
-        try {
-          return produce(prevTree, (draft) => {
-            // Add the choice node to the root's children array
-            draft.children.push(newChoiceNode);
-          });
-        } catch (e) {
-          const errorMsg = e instanceof Error ? e.message : "Unknown error";
-          setError(`Error adding choice to root: ${errorMsg}`);
-          console.error("Error adding choice to root:", e);
-          return prevTree;
-        }
-      });
-
-      // Update derived state after tree changes
-      updateStateFromTree(tree);
-    },
-    [tree, updateStateFromTree]
-  );
+    setTree((prevTree) => {
+      try {
+        return produce(prevTree, (draft) => {
+          // Add the choice node to the root's children array
+          draft.children.push(newChoiceNode);
+        });
+      } catch (e) {
+        const errorMsg = e instanceof Error ? e.message : "Unknown error";
+        setError(`Error adding choice to root: ${errorMsg}`);
+        console.error("Error adding choice to root:", e);
+        return prevTree;
+      }
+    });
+    // Derived state will be updated by the useEffect
+  }, []);
 
   return {
     tree,
