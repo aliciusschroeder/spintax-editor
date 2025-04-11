@@ -12,6 +12,7 @@ import {
   SpintaxPath,
   TextNode,
 } from "@/types";
+import { produce } from "immer";
 import {
   ArrowDown,
   ArrowUp,
@@ -53,12 +54,26 @@ interface NodeContentDisplayProps {
 }
 const NodeContentDisplay: React.FC<NodeContentDisplayProps> = ({ content }) => {
   const announcedContent = [
-    {content: "", element: <span className="italic text-gray-400">empty text</span>},
-    {content: " ", element: <span className="italic text-gray-400">SPACE</span>},
-    {content: "\n", element: <span className="italic text-gray-400">NEWLINE</span>},
-    {content: "\t", element: <span className="italic text-gray-400">TAB</span>},
-  ]
-  const specialContent = announcedContent.find(item => item.content === content);
+    {
+      content: "",
+      element: <span className="italic text-gray-400">empty text</span>,
+    },
+    {
+      content: " ",
+      element: <span className="italic text-gray-400">SPACE</span>,
+    },
+    {
+      content: "\n",
+      element: <span className="italic text-gray-400">NEWLINE</span>,
+    },
+    {
+      content: "\t",
+      element: <span className="italic text-gray-400">TAB</span>,
+    },
+  ];
+  const specialContent = announcedContent.find(
+    (item) => item.content === content
+  );
   return <>{specialContent ? specialContent.element : content}</>;
 };
 
@@ -167,7 +182,9 @@ export const NodeEditor: React.FC<NodeEditorProps> = ({
       }
 
       if (parentNode.type === "text") {
-        console.error("Cannot move up: Parent node is a text node with no children");
+        console.error(
+          "Cannot move up: Parent node is a text node with no children"
+        );
         return parentNode;
       }
 
@@ -185,29 +202,11 @@ export const NodeEditor: React.FC<NodeEditorProps> = ({
         return parentNode;
       }
 
-      const newChildren = [...parentNode.children];
-      const [removed] = newChildren.splice(currentIndex, 1);
-      newChildren.splice(currentIndex - 1, 0, removed);
-
-      // Create a properly typed new node based on the parent type
-      switch (parentNode.type) {
-        case "root":
-          return { ...parentNode, children: newChildren };
-        case "choice":
-          // Need to ensure we only have OptionNodes in a choice's children
-          if (newChildren.every(child => child.type === "option")) {
-            return {
-              ...parentNode,
-              children: newChildren as OptionNode[]
-            };
-          }
-          console.error("Invalid child types for choice node");
-          return parentNode;
-        case "option":
-          return { ...parentNode, children: newChildren };
-        default:
-          return parentNode;
-      }
+      return produce(parentNode, (draft) => {
+        const newChildren = draft.children;
+        const [removed] = newChildren.splice(currentIndex, 1);
+        newChildren.splice(currentIndex - 1, 0, removed);
+      });
     });
   };
 
@@ -224,7 +223,9 @@ export const NodeEditor: React.FC<NodeEditorProps> = ({
       }
 
       if (parentNode.type === "text") {
-        console.error("Cannot move down: Parent node is a text node with no children");
+        console.error(
+          "Cannot move down: Parent node is a text node with no children"
+        );
         return parentNode;
       }
 
@@ -237,29 +238,11 @@ export const NodeEditor: React.FC<NodeEditorProps> = ({
         return parentNode; // Already at the bottom or invalid index
       }
 
-      const newChildren = [...parentNode.children];
-      const [removed] = newChildren.splice(currentIndex, 1);
-      newChildren.splice(currentIndex + 1, 0, removed);
-
-      // Create a properly typed new node based on the parent type
-      switch (parentNode.type) {
-        case "root":
-          return { ...parentNode, children: newChildren };
-        case "choice":
-          // Need to ensure we only have OptionNodes in a choice's children
-          if (newChildren.every(child => child.type === "option")) {
-            return {
-              ...parentNode,
-              children: newChildren as OptionNode[]
-            };
-          }
-          console.error("Invalid child types for choice node");
-          return parentNode;
-        case "option":
-          return { ...parentNode, children: newChildren };
-        default:
-          return parentNode;
-      }
+      return produce(parentNode, (draft) => {
+        const newChildren = draft.children;
+        const [removed] = newChildren.splice(currentIndex, 1);
+        newChildren.splice(currentIndex + 1, 0, removed);
+      });
     });
   };
 
