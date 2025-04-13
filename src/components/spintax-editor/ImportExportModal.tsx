@@ -6,8 +6,6 @@
  */
 
 import { exampleSpintax, exampleYaml } from "@/config/presets";
-import { parseYaml } from "@/lib/yaml";
-import { YamlEntries } from "@/types";
 import { AlertCircle } from "lucide-react";
 import React, { ChangeEvent, useEffect, useState } from "react";
 
@@ -22,10 +20,7 @@ export interface ImportExportModalProps {
   onClose: () => void;
 
   /** Callback when the user imports data */
-  onImport: (data: {
-    singleSpintax?: string;
-    yamlEntries?: YamlEntries;
-  }) => void;
+  onImport: (data: { singleSpintax?: string; yamlEntries?: string }) => void;
 }
 
 /**
@@ -66,17 +61,8 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
 
         onImport({ singleSpintax: importText });
       } else {
-        // YAML import
-        const entries = parseYaml(importText);
-
-        if (!entries || Object.keys(entries).length === 0) {
-          setError(
-            "No valid entries found in YAML input. Please check format."
-          );
-          return;
-        }
-
-        onImport({ yamlEntries: entries });
+        // YAML import: pass raw YAML string to parent for parsing/validation
+        onImport({ yamlEntries: importText });
       }
 
       onClose(); // Close the modal on successful import
