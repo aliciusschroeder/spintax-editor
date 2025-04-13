@@ -1,24 +1,44 @@
 /**
- * Functions for generating YAML content from structured data
+ * Advanced YAML generator for Spintax Editor.
+ * Updates a YAML Document AST with new values for editable entries,
+ * preserving all non-editable content, comments, and formatting.
  */
 
-import { YamlEntries } from "@/types";
+import type { YamlEntryMap } from "@/types/yaml";
+import YAML, { isScalar, isSeq } from "yaml";
 
 /**
- * Generates a YAML string from a structured object
+ * Generates a YAML string from a YamlEntryMap and the original Document AST.
+ * - Updates editable entries in the AST with new values.
+ * - Leaves non-editable nodes untouched.
+ * - Preserves comments and formatting.
  *
- * Note: This is a simplified implementation for demonstration purposes.
- * In a production environment, consider using a dedicated YAML library.
- *
- * @param entries - The key-value pairs to convert to YAML
- * @returns A YAML-formatted string
+ * @param entryMap - The map of YAML entries (with updated values)
+ * @param originalDoc - The original YAML Document AST
+ * @returns YAML string with updated values
  */
-export const generateYaml = (entries: YamlEntries): string => {
-  console.warn(
-    "generateYaml is a simplified implementation and does not handle all YAML features."
-  );
+export function generateYamlFromEntryMap(
+  entryMap: YamlEntryMap,
+  originalDoc: YAML.Document.Parsed
+): string {
+  // Update the AST in-place for editable entries
+  for (const entry of Object.values(entryMap)) {
+    if (!entry.node) continue;
+    if (entry.type === "string" && isScalar(entry.node)) {
+      entry.node.value = entry.value;
+    } else if (entry.type === "stringArray" && isSeq(entry.node)) {
+      // Update each string element in the sequence
+      for (let i = 0; i < entry.value.length; i++) {
+        const item = entry.node.items[i];
+        if (isScalar(item)) {
+          item.value = entry.value[i];
+        }
+      }
+      // If array length changed, handle add/remove (not supported in UI yet)
+    }
+    // Non-editable: do not modify
+  }
 
-  return Object.entries(entries)
-    .map(([key, value]) => `${key}: ${value}`)
-    .join("\n");
-};
+  // Output YAML with preserved formatting/comments
+  return originalDoc.toString();
+}
