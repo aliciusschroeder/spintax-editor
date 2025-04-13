@@ -1,5 +1,5 @@
 /**
- * SpintaxEditor Component
+ * SpintaxEditor Component (Refactored for advanced YAML handling)
  *
  * The main container component for the spintax editor application.
  * Manages multiple spintax entries, import/export functionality, and UI state.
@@ -7,14 +7,7 @@
 
 import editorLogo from "@/../public/logo.svg";
 import { useYamlEntries } from "@/hooks";
-import {
-  AlertCircle,
-  Copy,
-  Download,
-  FileCode,
-  Plus,
-  Upload,
-} from "lucide-react";
+import { AlertCircle, Copy, Download, FileCode, Upload } from "lucide-react";
 import Image from "next/image";
 import React, { useState } from "react";
 import { ConfirmReloadModal } from "./ConfirmReloadModal";
@@ -25,16 +18,16 @@ import { SpintaxEditorTab } from "./SpintaxEditorTab";
  * Main spintax editor component
  */
 export const SpintaxEditor: React.FC = () => {
-  // Use the YAML entries hook
+  // Use the YAML entries hook (refactored)
   const {
     entries,
     activeEntry,
     error,
     setActiveEntry,
-    addEntry: handleAddEntry,
     updateEntry,
-    loadDemo: handleLoadDemo,
-    handleImport,
+    addEntry,
+    loadDemo,
+    importFromYaml,
     exportToYaml,
   } = useYamlEntries();
 
@@ -66,6 +59,19 @@ export const SpintaxEditor: React.FC = () => {
       .catch((err) => {
         console.error("Failed to copy YAML export:", err);
       });
+  };
+
+  // Import handler for modal (supports legacy modal API)
+  const handleImport = (data: {
+    singleSpintax?: string;
+    yamlEntries?: string;
+  }) => {
+    if (data.yamlEntries && typeof data.yamlEntries === "string") {
+      importFromYaml(data.yamlEntries);
+    } else if (data.singleSpintax) {
+      // Optionally: show error or ignore, as single spintax import is not supported in new YAML system
+      // setError("Single spintax import is not supported. Please use YAML format.");
+    }
   };
 
   return (
@@ -114,7 +120,7 @@ export const SpintaxEditor: React.FC = () => {
           )}
 
           <button
-            onClick={handleLoadDemo}
+            onClick={loadDemo}
             className="px-3 py-1 bg-green-500 hover:bg-green-600 rounded text-md flex items-center"
             title="Load example YAML data"
           >
@@ -151,12 +157,24 @@ export const SpintaxEditor: React.FC = () => {
               <h3 className="font-semibold text-sm uppercase">Entries</h3>
               {/* Add New Entry Button */}
               <button
-                onClick={() => handleAddEntry()}
+                onClick={() => addEntry()}
                 className="p-1 text-blue-500 hover:text-blue-700"
                 title="Add New Entry"
                 aria-label="Add new entry"
               >
-                <Plus size={18} />
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
               </button>
             </div>
 
@@ -186,7 +204,16 @@ export const SpintaxEditor: React.FC = () => {
           {activeEntry && entries[activeEntry] !== undefined ? (
             <SpintaxEditorTab
               key={activeEntry}
-              initialSpintax={entries[activeEntry]}
+              initialSpintax={(() => {
+                const { entry, arrayIndex } = entries[activeEntry];
+                if (entry.type === "string") return entry.value;
+                if (
+                  entry.type === "stringArray" &&
+                  typeof arrayIndex === "number"
+                )
+                  return entry.value[arrayIndex];
+                return "";
+              })()}
               onUpdate={(newContent) => updateEntry(activeEntry, newContent)}
             />
           ) : (
@@ -202,8 +229,7 @@ export const SpintaxEditor: React.FC = () => {
                   </p>
                 ) : (
                   <p className="mb-4 text-gray-600">
-                    Select an entry from the sidebar to begin editing, or add a
-                    new one.
+                    Select an entry from the sidebar to begin editing.
                   </p>
                 )}
                 <div className="flex flex-col sm:flex-row justify-center space-y-2 sm:space-y-0 sm:space-x-4">
@@ -214,7 +240,7 @@ export const SpintaxEditor: React.FC = () => {
                     <Upload size={16} className="mr-2" /> Import Content
                   </button>
                   <button
-                    onClick={handleLoadDemo}
+                    onClick={loadDemo}
                     className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 flex items-center justify-center"
                   >
                     <FileCode size={16} className="mr-2" /> Load Demo
